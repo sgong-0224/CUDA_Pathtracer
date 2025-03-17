@@ -1,10 +1,6 @@
-# Project 3 CUDA Path Tracer - Instructions
+# CUDA Path Tracer - Instructions
 
-This is due **Tuesday October 1st** at 11:59pm.
-
-This project involves a significant bit of running time to generate high-quality images, so be sure to take that into account. You will receive an additional 2 days (due Thursday, October 3rd) for "README and Scene" only updates. However, the standard project requirements for READMEs still apply for the October 1st deadline. You may use these two extra days to improve your images, charts, performance analysis, etc.
-
-If you plan to use late days on this project (which we recommend), they can be applied to the code deadline (which will also push back the README deadline), or they can be applied to just the README deadline. For example, you can use one late day to push the code deadline to October 2nd and the README deadline to October 4th, and then use another late day to push the README deadline further to October 5th, for a total of two late days used.
+This project involves a significant bit of running time to generate high-quality images, so be sure to take that into account.
 
 [Link to "Pathtracing Primer" slides](https://docs.google.com/presentation/d/1pQU_qkxx9Pq9h2Y20tLvE7v7AwaA_6byvszXi9Y-K7A/edit?usp=drive_link)
 
@@ -29,7 +25,7 @@ The core renderer is left for you to implement. Finally, note that, while this b
 
 ## Running the code
 
-The main function requires a scene description file. Call the program with one as an argument: `cis565_path_tracer scenes/sphere.json`. (In Visual Studio, `../scenes/sphere.json`.)
+The main function requires a scene description file. Call the program with one as an argument: `path_tracer scenes/sphere.json`. (In Visual Studio, `../scenes/sphere.json`.)
 
 If you are using Visual Studio, you can set this in the `Debugging > Command Arguments` section in the `Project Properties`. Make sure you get the path right - read the console for errors.
 

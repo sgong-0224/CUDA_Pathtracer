@@ -50,4 +50,22 @@ __host__ __device__ void scatterRay(
     // TODO: implement this.
     // A basic implementation of pure-diffuse shading will just call the
     // calculateRandomDirectionInHemisphere defined above.
+    Ray newray;
+    newray.origin = intersect;
+
+    // RGB -> luma
+    const auto luma_vec = glm::vec3(0.2126, 0.7152, 0.0722);
+    float diffuse_luma = glm::dot(m.color, luma_vec);
+    float specular_luma = glm::dot(m.specular.color, luma_vec);
+    float diffuse_rate = diffuse_luma / (diffuse_luma + specular_luma);
+
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    if (u01(rng) < diffuse_rate) {
+        newray.direction = calculateRandomDirectionInHemisphere(normal, rng);
+        pathSegment.color *= m.color / diffuse_rate;
+    } else {
+        newray.direction = glm::reflect(pathSegment.ray.direction, normal);
+        pathSegment.color *= m.specular.color / (1 - diffuse_rate);
+    }
+    pathSegment.ray = newray;
 }
