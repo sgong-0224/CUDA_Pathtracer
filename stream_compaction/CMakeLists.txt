@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(cis5650_stream_compaction_test LANGUAGES CUDA CXX)
+project(stream_compaction_program LANGUAGES CUDA CXX)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
