@@ -6,6 +6,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
 #include <thrust/remove.h>
+#include <thrust/sort.h>
 
 #include "sceneStructs.h"
 #include "scene.h"
@@ -22,6 +23,12 @@
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
 
 extern void checkCUDAErrorFn(const char* msg, const char* file, int line);
+
+// (由ImgUI控件设置的)选项状态
+class Settings {
+public:
+    bool enable_RussianRoulette;
+};
 
 __host__ __device__
 thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
@@ -134,6 +141,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
     );
     segment.pixelIndex = index;
     segment.remainingBounces = traceDepth;   
+    segment.bounces = 0;
 }
 
 // 计算光线路径交叉
@@ -194,34 +202,54 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
 }
 
 // 着色器实现，处理BSDF: 出射光和入射光的亮度关系
-__global__ void shadeMaterials(
-    int iter,
-    int num_paths,
-    ShadeableIntersection* shadeableIntersections,
-    PathSegment* pathSegments,
-    Material* materials)
+__device__ void BSDF(int iter, int idx, const Settings& settings,  ShadeableIntersection& intersection, 
+                     PathSegment& segment, Material* materials);
+__global__ void shadeMaterials( int iter, int num_paths, const Settings& settings, ShadeableIntersection* shadeableIntersections,
+                                PathSegment* pathSegments, Material* materials)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_paths)
         return;
     auto& path_segment = pathSegments[idx];
     auto& shade_intersect = shadeableIntersections[idx];
-    if (shade_intersect.t > 0.0f) {
-        thrust::uniform_real_distribution<float> u01(0, 1);
-        thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, path_segment.remainingBounces);
-        auto& material = materials[shade_intersect.materialId];
-        if (material.emittance > 0.0f) {
-            path_segment.color *= material.color * material.emittance;
-            path_segment.remainingBounces = 0;
-        } else {
-            scatterRay( path_segment, getPointOnRay(path_segment.ray, shade_intersect.t),
-                        shade_intersect.surfaceNormal, material, rng);
-            if (--path_segment.remainingBounces == 0)
-                path_segment.color = glm::vec3(0.0f);
+    BSDF(iter, idx, settings, shade_intersect, path_segment, materials);
+}
+__device__ void BSDF(int iter, int idx, const Settings& settings, ShadeableIntersection& intersection, 
+                     PathSegment& segment, Material* materials)
+{
+    if (intersection.t <= 0.0f) {
+        segment.color = glm::vec3(0.0f);
+        segment.remainingBounces = 0;
+        return;
+    }
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, segment.remainingBounces);
+    auto& material = materials[intersection.materialId];
+    if (material.emittance > 0.0f) {
+        segment.color *= material.color * material.emittance;
+        segment.remainingBounces = 0;
+        return;
+    }
+    scatterRay(segment, getPointOnRay(segment.ray, intersection.t), intersection.surfaceNormal, material, rng);
+    segment.bounces += 1;
+    if (--segment.remainingBounces == 0) {
+        segment.color = glm::vec3(0.0f);
+        return;
+    }
+    // 俄罗斯轮盘算法
+    if (settings.enable_RussianRoulette && segment.bounces > 3) {
+        const auto luma_vec = glm::vec3(0.2126, 0.7152, 0.0722);
+        float segment_luma = glm::dot(segment.color, luma_vec);
+        // 终止概率：使用路径的当前颜色（累积反射率）来决定终止概率
+        float q = glm::max(0.05f, 1 - segment_luma);
+        if (u01(rng) < q) {
+            // c = 0
+            segment.color = glm::vec3(0.0f);
+            segment.remainingBounces = 0;
+            return;
         }
-    } else {
-        path_segment.color = glm::vec3(0.0f);
-        path_segment.remainingBounces = 0;
+        // F -> (F-qc)/(1-q) = F/1-q
+        segment.color /= 1.0f - q;
     }
 }
 
@@ -237,26 +265,35 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     }
 }
 
-__global__ 
-void mark_valid(int n_paths, int* dev_bools, PathSegment* dev_paths)
+// 去除不需要的光线路径
+__global__ void mark_valid(int n_paths, int* dev_bools, PathSegment* dev_paths)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n_paths)
         return;
     dev_bools[tid] = dev_paths[tid].remainingBounces ? 1 : 0;
 }
-__global__
-void keep_valid(int n_paths, PathSegment* dev_out_paths, PathSegment* dev_paths, const int* bools, const int* indices)
+__global__ void keep_valid(int n_paths, PathSegment* dev_out_paths, PathSegment* dev_paths, const int* bools, const int* indices)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n_paths)
         return;
+    auto keep_data = dev_paths[tid];
+    __syncthreads();
     if (bools[tid])
-        dev_out_paths[indices[tid]] = dev_paths[tid];
+        dev_out_paths[indices[tid]] = keep_data;
 }
-// FIXME: invalid mem access
-int remove_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSegment* dev_paths)
+int relocate_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSegment* dev_paths)
 {
+    // Hack: 特殊处理只有1条光线的情形
+    if (n_paths == 1) {
+        int bounces;
+        cudaMemcpy(&bounces, &(dev_paths->remainingBounces), sizeof(int), cudaMemcpyDeviceToHost);
+        if (bounces == 0)
+            return 0;
+        return 1;
+    }
+    // 其他情形可以用 stream_compaction 实现
     int new_npaths, *dev_bools, *dev_indices;
     cudaMalloc((void**)&dev_bools, n_paths * sizeof(int));
     cudaMalloc((void**)&dev_indices, n_paths * sizeof(int));
@@ -267,62 +304,6 @@ int remove_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSegme
     cudaFree(dev_indices);
     return new_npaths;
 }
-
-/*
-// 移除终止路径
-__global__
-void reverse(int n, int* dev_bools)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= n)
-        return;
-    dev_bools[tid] = !dev_bools[tid];
-}
-__global__
-void mark_invalid(int n_paths, int* dev_bools, PathSegment* dev_paths)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= n_paths)
-        return;
-    dev_bools[tid] = dev_paths[tid].remainingBounces ? 0 : 1;
-}
-__global__
-void keep(int n_paths, PathSegment* dev_out_paths, PathSegment* dev_paths, const int* bools, const int* indices)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= n_paths)
-        return;
-    auto path = dev_paths[tid];
-    __syncthreads();
-    if (bools[tid])
-        dev_out_paths[indices[tid]] = path;
-}
-int relocate_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSegment* dev_paths)
-{
-    int n_termpaths, new_npaths;
-    int* dev_bools, * dev_indices;
-    PathSegment* invalid_paths;
-    cudaMalloc((void**)&dev_bools, n_paths * sizeof(int));
-    cudaMalloc((void**)&dev_indices, n_paths * sizeof(int));
-    // 无效路径拷贝到 invalid_paths 备用
-    mark_invalid<<<n_blocks,blocksize>>>(n_paths, dev_bools, dev_paths);
-    n_termpaths = StreamCompaction::Efficient::compact(n_paths, dev_indices, dev_bools);
-    cudaMalloc((void**)&invalid_paths, n_termpaths * sizeof(PathSegment));
-    keep<<<n_blocks, blocksize>>>(n_paths, invalid_paths, dev_paths, dev_bools, dev_indices);
-    // 有效路径原地计算
-    reverse<<<n_blocks, blocksize>>> (n_paths, dev_bools);
-    new_npaths = StreamCompaction::Efficient::compact(n_paths, dev_indices, dev_bools);
-    keep<<<n_blocks, blocksize>>>(n_paths, dev_paths, dev_paths, dev_bools, dev_indices);
-    // 整理路径
-    cudaMemcpy(dev_paths + new_npaths, invalid_paths, n_termpaths * sizeof(PathSegment), cudaMemcpyDeviceToDevice);
-    cudaFree(invalid_paths);
-    cudaFree(dev_bools);
-    cudaFree(dev_indices);
-    return new_npaths;
-}
-
-
-*/
 
 // 入口函数
 void pathtrace(uchar4* pbo, int frame, int iter)
@@ -353,6 +334,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     int num_remaining_paths = num_paths;
     while (num_remaining_paths != 0)
     {
+        Settings settings;
+        settings.enable_RussianRoulette = guiData->russianRoulette;
         // clean shading chunks
         cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
         dim3 numblocksPathSegmentTracing = (num_remaining_paths + blockSize1d - 1) / blockSize1d;
@@ -363,13 +346,13 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
         depth += 1;
-        
+
         // 调用着色器
-        shadeMaterials<<<numblocksPathSegmentTracing, blockSize1d>>>( iter, num_remaining_paths,
+        shadeMaterials<<<numblocksPathSegmentTracing, blockSize1d>>>( iter, num_remaining_paths, settings,
             dev_intersections, dev_paths, dev_materials );
 
         // TODO: 移除终止的路径
-        num_remaining_paths = remove_terminated_paths(num_remaining_paths, numblocksPathSegmentTracing, blockSize1d, dev_paths);
+        num_remaining_paths = relocate_terminated_paths(num_remaining_paths, numblocksPathSegmentTracing, blockSize1d, dev_paths);
 
         if (guiData != NULL)
             guiData->TracedDepth = depth;

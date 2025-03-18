@@ -159,7 +159,7 @@ bool init()
         exit(EXIT_FAILURE);
     }
 
-    window = glfwCreateWindow(width, height, "CIS 565 Path Tracer", NULL, NULL);
+    window = glfwCreateWindow(width, height, "Path Tracer", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -234,6 +234,11 @@ void RenderImGui()
     //    counter++;
     //ImGui::SameLine();
     //ImGui::Text("counter = %d", counter);
+    
+    ImGui::Text("Options: \n");
+    // Ñ¡Ïî£º¶íÂÞË¹ÂÖÅÌÖÕÖ¹Ëã·¨
+    ImGui::Checkbox("Russian Roulette", &imguiData->russianRoulette);
+    ImGui::Text("Info: \n");
     ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
     ImGui::End();
@@ -257,7 +262,7 @@ void mainLoop()
 
         runCuda();
 
-        string title = "CIS565 Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
+        string title = "Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
         glfwSetWindowTitle(window, title.c_str());
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, displayImage);

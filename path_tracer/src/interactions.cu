@@ -57,7 +57,9 @@ __host__ __device__ void scatterRay(
     const auto luma_vec = glm::vec3(0.2126, 0.7152, 0.0722);
     float diffuse_luma = glm::dot(m.color, luma_vec);
     float specular_luma = glm::dot(m.specular.color, luma_vec);
-    float diffuse_rate = diffuse_luma / (diffuse_luma + specular_luma);
+    float total_luma = diffuse_luma + specular_luma;
+    // Hack: total_luma != 0
+    float diffuse_rate = total_luma == 0.0f ? 0.0f : (diffuse_luma / total_luma);
 
     thrust::uniform_real_distribution<float> u01(0, 1);
     if (u01(rng) < diffuse_rate) {
@@ -67,5 +69,6 @@ __host__ __device__ void scatterRay(
         newray.direction = glm::reflect(pathSegment.ray.direction, normal);
         pathSegment.color *= m.specular.color / (1 - diffuse_rate);
     }
+    pathSegment.color *= glm::dot(newray.direction, normal);
     pathSegment.ray = newray;
 }

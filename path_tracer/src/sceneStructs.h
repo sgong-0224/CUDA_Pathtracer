@@ -72,6 +72,7 @@ struct PathSegment
     glm::vec3 color;
     int pixelIndex;
     int remainingBounces;
+    int bounces;
 };
 
 // Use with a corresponding PathSegment to do:
@@ -82,4 +83,8 @@ struct ShadeableIntersection
   float t;
   glm::vec3 surfaceNormal;
   int materialId;
+  // ∞¥≤ƒ÷ ≈≈–Ú
+  bool operator<(const ShadeableIntersection& other) const {
+      return materialId < other.materialId;
+  }
 };
