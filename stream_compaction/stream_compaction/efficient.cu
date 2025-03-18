@@ -46,7 +46,7 @@ namespace StreamCompaction {
 		void gpu_scan_block(int n, int* sum_buf, int* odata, const int* idata)
 		{
             extern __shared__ int shm_data[];
-            int blocksize = n < (blockDim.x<<1) ? n : (blockDim.x << 1);
+            int blocksize = n < (blockDim.x<<1) ? n : (blockDim.x<<1);
 
             int tid        = threadIdx.x,
                 init_l     = threadIdx.x,
@@ -85,8 +85,10 @@ namespace StreamCompaction {
             }
             // 写回输出位置
             __syncthreads();
-            odata[global_idx] = global_idx < n ? shm_data[POSITION(init_l)] : 0;
-            odata[global_idx + blockDim.x] = global_idx + blockDim.x < n ? shm_data[POSITION(init_r)] : 0;
+            if (global_idx < n)
+                odata[global_idx] = shm_data[POSITION(init_l)];
+            if (global_idx + blockDim.x < n)
+                odata[global_idx + blockDim.x] = shm_data[POSITION(init_r)];
         }
 
         // 2. 跨线程块的前缀和：将前一个线程块的求和结果加到本线程块的所有元素

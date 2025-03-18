@@ -237,34 +237,92 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     }
 }
 
-// 停止追踪判别
-struct is_valid
+__global__ 
+void mark_valid(int n_paths, int* dev_bools, PathSegment* dev_paths)
 {
-    __host__ __device__ bool operator()(const PathSegment& p)
-    {
-        return p.remainingBounces > 0;
-    }
-};
-
-int remove_terminated_paths(int n_paths, PathSegment* path_segs)
-{
-    using namespace StreamCompaction::Efficient;
-    int* flags = (int*)malloc(n_paths * sizeof(int));
-    int* flags_out = (int*)malloc(n_paths * sizeof(int));
-#pragma unroll 4
-    for (int i = 0; i < n_paths; ++i)
-        flags[i] = path_segs[i].remainingBounces ? 1 : 0;
-    int m = compact(n_paths, flags_out, flags);
-    int idx = 0;
-#pragma unroll 4
-    for (int i = 0; i < n_paths; ++i) {
-        if (flags[i])
-            path_segs[idx++] = path_segs[i];
-    }
-    free(flags);
-    free(flags_out);
-    return m;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n_paths)
+        return;
+    dev_bools[tid] = dev_paths[tid].remainingBounces ? 1 : 0;
 }
+__global__
+void keep_valid(int n_paths, PathSegment* dev_out_paths, PathSegment* dev_paths, const int* bools, const int* indices)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n_paths)
+        return;
+    if (bools[tid])
+        dev_out_paths[indices[tid]] = dev_paths[tid];
+}
+// FIXME: invalid mem access
+int remove_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSegment* dev_paths)
+{
+    int new_npaths, *dev_bools, *dev_indices;
+    cudaMalloc((void**)&dev_bools, n_paths * sizeof(int));
+    cudaMalloc((void**)&dev_indices, n_paths * sizeof(int));
+    mark_valid<<<n_blocks,blocksize>>>(n_paths, dev_bools, dev_paths);
+    new_npaths = StreamCompaction::Efficient::compact(n_paths, dev_indices, dev_bools);
+    keep_valid<<<n_blocks, blocksize>>>(n_paths, dev_paths, dev_paths, dev_bools, dev_indices);
+    cudaFree(dev_bools);
+    cudaFree(dev_indices);
+    return new_npaths;
+}
+
+/*
+// 移除终止路径
+__global__
+void reverse(int n, int* dev_bools)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n)
+        return;
+    dev_bools[tid] = !dev_bools[tid];
+}
+__global__
+void mark_invalid(int n_paths, int* dev_bools, PathSegment* dev_paths)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n_paths)
+        return;
+    dev_bools[tid] = dev_paths[tid].remainingBounces ? 0 : 1;
+}
+__global__
+void keep(int n_paths, PathSegment* dev_out_paths, PathSegment* dev_paths, const int* bools, const int* indices)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n_paths)
+        return;
+    auto path = dev_paths[tid];
+    __syncthreads();
+    if (bools[tid])
+        dev_out_paths[indices[tid]] = path;
+}
+int relocate_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSegment* dev_paths)
+{
+    int n_termpaths, new_npaths;
+    int* dev_bools, * dev_indices;
+    PathSegment* invalid_paths;
+    cudaMalloc((void**)&dev_bools, n_paths * sizeof(int));
+    cudaMalloc((void**)&dev_indices, n_paths * sizeof(int));
+    // 无效路径拷贝到 invalid_paths 备用
+    mark_invalid<<<n_blocks,blocksize>>>(n_paths, dev_bools, dev_paths);
+    n_termpaths = StreamCompaction::Efficient::compact(n_paths, dev_indices, dev_bools);
+    cudaMalloc((void**)&invalid_paths, n_termpaths * sizeof(PathSegment));
+    keep<<<n_blocks, blocksize>>>(n_paths, invalid_paths, dev_paths, dev_bools, dev_indices);
+    // 有效路径原地计算
+    reverse<<<n_blocks, blocksize>>> (n_paths, dev_bools);
+    new_npaths = StreamCompaction::Efficient::compact(n_paths, dev_indices, dev_bools);
+    keep<<<n_blocks, blocksize>>>(n_paths, dev_paths, dev_paths, dev_bools, dev_indices);
+    // 整理路径
+    cudaMemcpy(dev_paths + new_npaths, invalid_paths, n_termpaths * sizeof(PathSegment), cudaMemcpyDeviceToDevice);
+    cudaFree(invalid_paths);
+    cudaFree(dev_bools);
+    cudaFree(dev_indices);
+    return new_npaths;
+}
+
+
+*/
 
 // 入口函数
 void pathtrace(uchar4* pbo, int frame, int iter)
@@ -311,8 +369,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_intersections, dev_paths, dev_materials );
 
         // TODO: 移除终止的路径
-        dev_path_end = thrust::remove_if(dev_paths, dev_path_end, is_valid());
-        num_remaining_paths = dev_path_end - dev_paths;
+        num_remaining_paths = remove_terminated_paths(num_remaining_paths, numblocksPathSegmentTracing, blockSize1d, dev_paths);
+
         if (guiData != NULL)
             guiData->TracedDepth = depth;
     }
