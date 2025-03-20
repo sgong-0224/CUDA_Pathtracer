@@ -220,8 +220,6 @@ void RenderImGui()
     static float f = 0.0f;
     static int counter = 0;
 
-    ImGui::Begin("Path Tracer Analytics");                  // Create a window called "Hello, world!" and append into it.
-    
     // LOOK: Un-Comment to check the output window and usage
     //ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
     //ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
@@ -235,12 +233,17 @@ void RenderImGui()
     //ImGui::SameLine();
     //ImGui::Text("counter = %d", counter);
     
-    ImGui::Text("Options: \n");
-    // 选项：俄罗斯轮盘终止算法
-    ImGui::Checkbox("Russian Roulette", &imguiData->russianRoulette);
-    ImGui::Text("Info: \n");
+    ImGui::Begin("Path Tracer Analytics", 0, ImGuiWindowFlags_AlwaysAutoResize); // Create a window called "Hello, world!" and append into it.
     ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+    
+    if (ImGui::CollapsingHeader("General settings:", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // 选项：俄罗斯轮盘终止算法
+        ImGui::Checkbox("Russian roulette", &imguiData->russianRoulette);
+        // 选项：聚集材质
+        ImGui::Checkbox("Sort by material(can harm performance)", &imguiData->sortbyMaterial);
+    }
+
     ImGui::End();
 
 

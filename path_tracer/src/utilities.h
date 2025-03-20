@@ -19,7 +19,9 @@ class GuiDataContainer
 public:
     GuiDataContainer() : TracedDepth(0) {}
     int TracedDepth;
+    // Options:
     bool russianRoulette{ true };
+    bool sortbyMaterial{ false };
 };
 
 namespace utilityCore
