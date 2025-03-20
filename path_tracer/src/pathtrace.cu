@@ -74,7 +74,10 @@ static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_intersections = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
 static Settings* dev_settings = NULL;
+// faster stream compaction
 static PathSegment* dev_paths_buf = NULL;
+static int* path_boolean_buf = NULL;
+static int* path_indices_buf = NULL;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -105,6 +108,8 @@ void pathtraceInit(Scene* scene)
     // TODO: initialize any extra device memeory you need
     cudaMalloc(&dev_settings, sizeof(Settings));
     cudaMalloc(&dev_paths_buf, pixelcount * sizeof(PathSegment));
+    cudaMalloc(&path_boolean_buf, pixelcount * sizeof(int));
+    cudaMalloc(&path_indices_buf, pixelcount * sizeof(int));
 
     checkCUDAError("pathtraceInit");
 }
@@ -119,6 +124,8 @@ void pathtraceFree()
     // TODO: clean up any extra device memory you created
     cudaFree(dev_settings);
     cudaFree(dev_paths_buf);
+    cudaFree(path_boolean_buf);
+    cudaFree(path_indices_buf);
 
     checkCUDAError("pathtraceFree");
 }
@@ -272,65 +279,48 @@ __global__ void mark_valid(int n_paths, int* dev_bools, PathSegment* dev_paths)
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n_paths)
         return;
-    dev_bools[tid] = dev_paths[tid].remainingBounces > 0 ? 1 : 0;
+    dev_bools[tid] = dev_paths[tid].remainingBounces == 0 ? 0 : 1;
 }
-__global__ void mark_invalid(int n_paths, int* dev_bools, PathSegment* dev_paths)
+__global__ void keep(int n_paths, int new_npaths, PathSegment* dev_out_paths, PathSegment* dev_paths, 
+                     const int* bools, const int* indices)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n_paths)
         return;
-    dev_bools[tid] = dev_paths[tid].remainingBounces > 0 ? 0 : 1;
-}
-__global__ void reverse(int n, int* out_bools, int* in_bools)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= n)
-        return;
-    out_bools[tid] = in_bools[tid] == 0 ? 1 : 0;
-}
-__global__ void keep(int n_paths, PathSegment* dev_out_paths, PathSegment* dev_paths, const int* bools, const int* indices)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= n_paths)
-        return;
-    if (bools[tid])
-        // 只要bools[tid]为真，indices[tid]互不相同，不会冲突
+    if (bools[tid]) // 只要bools[tid]为真，indices[tid]互不相同，不会冲突
         dev_out_paths[indices[tid]] = dev_paths[tid];
+    else            // 对无效元素，tid 的增速一定大于 indices[tid]
+        dev_out_paths[new_npaths + tid - indices[tid]] = dev_paths[tid];
 }
-int relocate_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSegment* dev_paths, PathSegment* buf)
+int relocate_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSegment* dev_paths, 
+                              PathSegment* buf, int* bools, int* indices)
 {
     // Hack: 特殊处理只有1条光线的情形
     if (n_paths == 1) {
         int bounces;
         cudaMemcpy(&bounces, &(dev_paths->remainingBounces), sizeof(int), cudaMemcpyDeviceToHost);
-        if (bounces == 0)
-            return 0;
-        return 1;
+        return bounces == 0 ? 0 : 1;
     }
     // 其他情形用 StreamCompaction 的实现
-    int *keep_bools, *keep_indices, *drop_bools, *drop_indices;
-    int copy_last, valid_elems, new_npaths, drop_npaths;
-    cudaMalloc(&keep_bools, n_paths * sizeof(int));
-    cudaMalloc(&drop_bools, n_paths * sizeof(int));
-    cudaMalloc(&keep_indices, n_paths * sizeof(int));
-    cudaMalloc(&drop_indices, n_paths * sizeof(int));
+    int copy_last, valid_elems, new_npaths;
 
-    mark_valid<<<n_blocks,blocksize>>>(n_paths, keep_bools, dev_paths);
-    StreamCompaction::Efficient::scan(n_paths, keep_indices, keep_bools);
-    mark_invalid << <n_blocks, blocksize >> > (n_paths, drop_bools, dev_paths);
-    StreamCompaction::Efficient::scan(n_paths, drop_indices, drop_bools);
-    cudaMemcpy(&valid_elems, keep_indices + n_paths - 1, sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&copy_last, keep_bools + n_paths - 1, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaStream_t copy_stream;
+    cudaStreamCreate(&copy_stream);
+    cudaEvent_t ready_event;
+    cudaMemcpyAsync(buf, dev_paths, n_paths * sizeof(PathSegment), cudaMemcpyDeviceToDevice, copy_stream);
+    cudaEventCreate(&ready_event);
+    cudaEventRecord(ready_event, copy_stream);
+
+    mark_valid<<<n_blocks,blocksize>>>(n_paths, bools, dev_paths);
+    StreamCompaction::Efficient::scan(n_paths, indices, bools);
+    cudaMemcpy(&valid_elems, indices + n_paths - 1, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&copy_last, bools + n_paths - 1, sizeof(int), cudaMemcpyDeviceToHost);
     new_npaths = copy_last + valid_elems;
-    keep<<<n_blocks, blocksize>>>(n_paths, buf, dev_paths, keep_bools, keep_indices);
-    keep<<<n_blocks, blocksize>>> (n_paths, buf + new_npaths, dev_paths, drop_bools, drop_indices);
-    // FIXED:
-    cudaMemcpy(dev_paths, buf, n_paths*sizeof(PathSegment), cudaMemcpyDeviceToDevice);
-    
-    cudaFree(keep_bools);
-    cudaFree(drop_bools);
-    cudaFree(keep_indices); 
-    cudaFree(drop_indices);
+    cudaEventSynchronize(ready_event);
+    keep<<<n_blocks, blocksize>>> (n_paths, new_npaths, dev_paths, buf, bools, indices);
+   
+    cudaEventDestroy(ready_event);
+    cudaStreamDestroy(copy_stream);
     return new_npaths;
 }
 
@@ -389,8 +379,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         settings.enable_RussianRoulette = guiData->russianRoulette;
         settings.enable_SortbyMaterial = guiData->sortbyMaterial;
 
-        cudaMemcpyAsync(dev_settings, &settings, sizeof(Settings), cudaMemcpyHostToDevice, copy_stream);
         cudaEvent_t ready_event;
+        cudaMemcpyAsync(dev_settings, &settings, sizeof(Settings), cudaMemcpyHostToDevice, copy_stream);
         cudaEventCreate(&ready_event);
         cudaEventRecord(ready_event, copy_stream);
 
@@ -429,17 +419,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         // 移除终止的路径
         num_remaining_paths = relocate_terminated_paths(num_remaining_paths, numblocksPathSegmentTracing, blockSize1d, 
-                                                        dev_paths, dev_paths_buf);
-		
-        /* thrust implementation: 
-            num_remaining_paths = thrust::stable_partition(
-                thrust::device,
-                thrust::device_pointer_cast(dev_paths),
-			    thrust::device_pointer_cast(dev_paths + num_remaining_paths),
-                is_valid()
-            ) - thrust::device_pointer_cast(dev_paths);
-        */
-        
+                                                        dev_paths, dev_paths_buf, path_boolean_buf, path_indices_buf);        
         checkCUDAError("relocate terminated paths");
 
         if (guiData != NULL)
