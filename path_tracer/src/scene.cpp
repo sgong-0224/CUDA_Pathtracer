@@ -1,11 +1,17 @@
 #include <iostream>
 #include <cstring>
+#include <omp.h>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <unordered_map>
 #include "json.hpp"
+#include <filesystem>
+
+#define TINYOBJLOADER_IMPLEMENTATION
 #include "scene.h"
+
 using json = nlohmann::json;
+namespace fs = std::filesystem;
 
 Scene::Scene(string filename)
 {
@@ -28,6 +34,9 @@ void Scene::loadFromJSON(const std::string& jsonName)
 {
     std::ifstream f(jsonName);
     json data = json::parse(f);
+    auto cfg_path = std::filesystem::absolute(jsonName);
+    
+    // Material
     const auto& materialsData = data["Materials"];
     std::unordered_map<std::string, uint32_t> MatNameToID;
     for (const auto& item : materialsData.items())
@@ -35,53 +44,109 @@ void Scene::loadFromJSON(const std::string& jsonName)
         const auto& name = item.key();
         const auto& p = item.value();
         Material newMaterial{};
-        // TODO: handle materials loading differently
-        if (p["TYPE"] == "Diffuse")
-        {
-            const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-        }
-        else if (p["TYPE"] == "Emitting")
-        {
-            const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-            newMaterial.emittance = p["EMITTANCE"];
-        }
-        else if (p["TYPE"] == "Specular")
-        {
-            const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-        }
+        // TODO: handle materials loading
+        const std::vector<float> default_color = { 0.0f,0.0f,0.0f };
+        const auto& col = p.value("RGB", default_color);
+        const auto& spec_col = p.value("SPECRGB", default_color);
+        newMaterial.specular.exponent = p.value("SPECEX",0.0f);
+        newMaterial.hasReflective = p.value("REFLECTIVE",0.0f);
+        newMaterial.emittance = p.value("EMITTANCE",0.0f);
+        newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+        newMaterial.specular.color = glm::vec3(spec_col[0], spec_col[1], spec_col[2]);
         MatNameToID[name] = materials.size();
+        // 处理自定义纹理
+        newMaterial.texture_id = -1;
+        if (p["TYPE"] == "Texture") {
+            // TODO
+            printf("texture\n");
+            string filename = (cfg_path.parent_path() / "Textures" / p["TEXTURE_FILE"]).string();
+        }
         materials.emplace_back(newMaterial);
     }
+
+    // Object/Geom
     const auto& objectsData = data["Objects"];
     for (const auto& p : objectsData)
     {
         const auto& type = p["TYPE"];
         Geom newGeom;
-        if (type == "cube")
-        {
-            newGeom.type = CUBE;
+        if (type == "mesh") {   
+            // 单独处理网格
+            newGeom.type = MESH;
+            string filename = (cfg_path.parent_path()/"Models"/p["MESH_FILE"]).string();
+            triangles.clear();
+            tinyobj::attrib_t attr;
+            std::vector<tinyobj::shape_t> shapes;
+            std::vector<tinyobj::material_t> materials;
+            std::string err;
+            bool status = tinyobj::LoadObj(&attr, &shapes, &materials, &err, filename.c_str());
+            if (!err.empty())
+                std::cout << err << '\n';
+            if (!status)
+                exit(1);
+            omp_set_nested(1);
+#pragma omp parallel for
+            for (size_t i = 0; i < shapes.size(); ++i) {
+                size_t idx = 0;
+                #pragma omp parallel for
+                for (size_t j = 0; j < shapes[i].mesh.num_face_vertices.size(); ++j) {
+                    int fv = shapes[i].mesh.num_face_vertices[j];
+                    // 根据顶点构建三角形
+                    Triangle tri;
+                    for (size_t v = 0; v < fv; ++v) {
+                        tinyobj::index_t mesh_id = shapes[i].mesh.indices[idx + v];
+                        tinyobj::real_t vx = attr.vertices[3 * mesh_id.vertex_index + 0];
+                        tinyobj::real_t vy = attr.vertices[3 * mesh_id.vertex_index + 1];
+                        tinyobj::real_t vz = attr.vertices[3 * mesh_id.vertex_index + 2];
+                        tri.vertices[v] = glm::vec3(vx, vy, vz);
+                    }
+                    tri.surface_normal = glm::cross(tri.vertices[1] - tri.vertices[0], tri.vertices[2] - tri.vertices[0]);
+                    triangles.emplace_back(tri);
+                    idx += fv;
+                }
+            }
+            newGeom.n_tris = triangles.size();
+            const auto& trans = p["TRANS"];
+            const auto& rotat = p["ROTAT"];
+            const auto& scale = p["SCALE"];
+            newGeom.translation = glm::vec3(trans[0], trans[1], trans[2]);
+            newGeom.rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
+            newGeom.scale = glm::vec3(scale[0], scale[1], scale[2]);
+            // 计算BoundingBox
+            newGeom.min_bound = triangles[0].vertices[0];
+            newGeom.max_bound = triangles[0].vertices[0];
+            for (auto& tri : triangles) {
+#pragma omp simd
+                for (int i = 0; i < 3; ++i) {
+                    tri.vertices[i].x *= newGeom.scale[0];
+                    tri.vertices[i].y *= newGeom.scale[1];
+                    tri.vertices[i].z *= newGeom.scale[2];
+                    newGeom.min_bound = glm::min(newGeom.min_bound, tri.vertices[i]);
+                    newGeom.max_bound = glm::max(newGeom.max_bound, tri.vertices[i]);
+                }
+            }
         }
-        else
-        {
-            newGeom.type = SPHERE;
+        else {
+            if (type == "cube")
+                newGeom.type = CUBE;
+            else if (type == "sphere")
+                newGeom.type = SPHERE;
+            const auto& trans = p["TRANS"];
+            const auto& rotat = p["ROTAT"];
+            const auto& scale = p["SCALE"];
+            newGeom.translation = glm::vec3(trans[0], trans[1], trans[2]);
+            newGeom.rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
+            newGeom.scale = glm::vec3(scale[0], scale[1], scale[2]);
         }
         newGeom.materialid = MatNameToID[p["MATERIAL"]];
-        const auto& trans = p["TRANS"];
-        const auto& rotat = p["ROTAT"];
-        const auto& scale = p["SCALE"];
-        newGeom.translation = glm::vec3(trans[0], trans[1], trans[2]);
-        newGeom.rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
-        newGeom.scale = glm::vec3(scale[0], scale[1], scale[2]);
         newGeom.transform = utilityCore::buildTransformationMatrix(
             newGeom.translation, newGeom.rotation, newGeom.scale);
         newGeom.inverseTransform = glm::inverse(newGeom.transform);
         newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
-
         geoms.push_back(newGeom);
     }
+
+    // Camera
     const auto& cameraData = data["Camera"];
     Camera& camera = state.camera;
     RenderState& state = this->state;

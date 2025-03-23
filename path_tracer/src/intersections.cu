@@ -1,6 +1,7 @@
 #include "intersections.h"
 
-__host__ __device__ float boxIntersectionTest(
+__host__ __device__ 
+float boxIntersectionTest(
     Geom box,
     Ray r,
     glm::vec3 &intersectionPoint,
@@ -56,7 +57,8 @@ __host__ __device__ float boxIntersectionTest(
     return -1;
 }
 
-__host__ __device__ float sphereIntersectionTest(
+__host__ __device__ 
+float sphereIntersectionTest(
     Geom sphere,
     Ray r,
     glm::vec3 &intersectionPoint,
@@ -110,4 +112,16 @@ __host__ __device__ float sphereIntersectionTest(
     }
 
     return glm::length(r.origin - intersectionPoint);
+}
+
+// 其他形状的碰撞检测
+__host__ __device__ 
+float meshIntersectionTest(
+    Geom mesh,
+    Ray r,
+    glm::vec3& normal,
+    Triangle* triangles
+)
+{
+    return 0.0f;
 }

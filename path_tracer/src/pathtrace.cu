@@ -192,7 +192,14 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
         else if (geom.type == SPHERE)
             t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
         // TODO: add more intersection tests here... triangle? metaball? CSG?
-
+        // Åö×²¼ì²â
+        else if (geom.type == MESH) {
+            if (settings->use_BVHtree)
+                (void)0;
+            else
+                (void)1;
+                // t = meshIntersectionTest();
+        }
         // Compute the minimum t from the intersection tests to determine what
         // scene geometry object was hit first.
         if (t > 0.0f && t_min > t){

@@ -10,7 +10,8 @@
 enum GeomType
 {
     SPHERE,
-    CUBE
+    CUBE,
+    MESH
 };
 
 struct Ray
@@ -29,6 +30,10 @@ struct Geom
     glm::mat4 transform;
     glm::mat4 inverseTransform;
     glm::mat4 invTranspose;
+    // Mesh:
+    int n_tris;
+    glm::vec3 min_bound;
+    glm::vec3 max_bound;
 };
 
 struct Material
@@ -43,6 +48,8 @@ struct Material
     float hasRefractive;
     float indexOfRefraction;
     float emittance;
+    // 自定义纹理:
+    int texture_id;
 };
 
 struct Camera
@@ -127,4 +134,8 @@ public:
         calculate_boundaries(min, max);
         return BoundingBox(min, max);
     }
+};
+class Texture {
+public:
+    int id;
 };

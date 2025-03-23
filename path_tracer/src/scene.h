@@ -8,6 +8,10 @@
 #include "utilities.h"
 #include "sceneStructs.h"
 
+#include "TinyObjLoader/tiny_obj_loader.h"
+#include "boundingbox.h"
+#include "BVH_tree.h"
+
 using namespace std;
 
 class Scene
@@ -21,5 +25,6 @@ public:
 
     std::vector<Geom> geoms;
     std::vector<Material> materials;
+    std::vector<Triangle> triangles;
     RenderState state;
 };
