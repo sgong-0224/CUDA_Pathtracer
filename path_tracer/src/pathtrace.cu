@@ -32,6 +32,8 @@ class Settings {
 public:
     bool enable_RussianRoulette;
     bool enable_SortbyMaterial;
+    bool use_Thrust;
+    bool use_BVHtree;
 };
 
 __host__ __device__
@@ -110,6 +112,7 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_paths_buf, pixelcount * sizeof(PathSegment));
     cudaMalloc(&path_boolean_buf, pixelcount * sizeof(int));
     cudaMalloc(&path_indices_buf, pixelcount * sizeof(int));
+    // Bounding boxes & BVH trees
 
     checkCUDAError("pathtraceInit");
 }
@@ -126,12 +129,13 @@ void pathtraceFree()
     cudaFree(dev_paths_buf);
     cudaFree(path_boolean_buf);
     cudaFree(path_indices_buf);
+    // Bounding boxes & BVH trees
 
     checkCUDAError("pathtraceFree");
 }
 
 // 生成从观察者镜头出发的光线路径(第1次反射)
-// 实现：
+// 可能在此实现：
 //      抗锯齿 - 生成次像素采样的光线
 //      动态模糊 - 即时扰动光线
 //      镜头效果 - 根据镜头扰动光线起点
@@ -161,7 +165,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
     segment.bounces = 0;
 }
 
-// 计算光线路径交叉
+// 计算路径交点
 __global__ void computeIntersections( int depth, int num_paths, PathSegment* pathSegments, 
     Geom* geoms, int geoms_size, ShadeableIntersection* intersections, Settings* settings)
 {
@@ -331,16 +335,10 @@ struct material_compare {
     }
 };
 
-// 判断路径有效
 struct is_valid {
-    __device__ bool operator()(const PathSegment& p) {
-        return p.remainingBounces > 0;
-    }
-};
-struct is_terminated {
-    __device__ bool operator()(const PathSegment& p) {
-        return p.remainingBounces <= 0;
-    }
+	__device__ bool operator()(const PathSegment& path) {
+		return path.remainingBounces > 0;
+	}
 };
 
 // 入口函数
@@ -374,10 +372,13 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     {
         cudaStream_t copy_stream;
         cudaStreamCreate(&copy_stream);
-
+        
+        // 设置选项
         Settings settings;
         settings.enable_RussianRoulette = guiData->russianRoulette;
         settings.enable_SortbyMaterial = guiData->sortbyMaterial;
+        settings.use_Thrust = guiData->useThrustPartition;
+        settings.use_BVHtree = guiData->useBVHtree;
 
         cudaEvent_t ready_event;
         cudaMemcpyAsync(dev_settings, &settings, sizeof(Settings), cudaMemcpyHostToDevice, copy_stream);
@@ -391,7 +392,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         cudaEventDestroy(ready_event);
         cudaStreamDestroy(copy_stream);
 
-        // 计算光线交叉
+        // 计算路径交点
         computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> ( depth, num_remaining_paths, dev_paths, 
             dev_geoms, hst_scene->geoms.size(), dev_intersections, dev_settings );
         checkCUDAError("trace one bounce");
@@ -418,8 +419,15 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         checkCUDAError("shade materials");
 
         // 移除终止的路径
-        num_remaining_paths = relocate_terminated_paths(num_remaining_paths, numblocksPathSegmentTracing, blockSize1d, 
-                                                        dev_paths, dev_paths_buf, path_boolean_buf, path_indices_buf);        
+        if(settings.use_Thrust)
+            num_remaining_paths =   thrust::stable_partition(
+                                        thrust::device, thrust::device_pointer_cast(dev_paths),
+                                        thrust::device_pointer_cast(dev_paths + num_remaining_paths), is_valid()
+                                    ) - thrust::device_pointer_cast(dev_paths);
+        else
+            num_remaining_paths =  relocate_terminated_paths(num_remaining_paths, numblocksPathSegmentTracing, blockSize1d, 
+                                                            dev_paths, dev_paths_buf, path_boolean_buf, path_indices_buf);   
+        
         checkCUDAError("relocate terminated paths");
 
         if (guiData != NULL)

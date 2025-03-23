@@ -2,8 +2,8 @@
 
 __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal,
-    thrust::default_random_engine &rng)
-{
+    thrust::default_random_engine &rng
+){
     thrust::uniform_real_distribution<float> u01(0, 1);
 
     float up = sqrt(u01(rng)); // cos(theta)
@@ -45,33 +45,34 @@ __host__ __device__ void scatterRay(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material &m,
-    thrust::default_random_engine &rng)
-{
+    thrust::default_random_engine &rng
+){
     // TODO: implement this.
     // A basic implementation of pure-diffuse shading will just call the
     // calculateRandomDirectionInHemisphere defined above.
-    Ray newray;
+    Ray& newray = pathSegment.ray;
     newray.origin = intersect;
-
-    // RGB -> luma
-    const auto luma_vec = glm::vec3(0.2126, 0.7152, 0.0722);
-    float diffuse_luma = glm::dot(m.color, luma_vec);
-    float specular_luma = glm::dot(m.specular.color, luma_vec);
-    float total_luma = diffuse_luma + specular_luma;
-    // Hack: total_luma != 0
-    float diffuse_rate = total_luma == 0.0f ? 0.000001f : (diffuse_luma / total_luma);
-    diffuse_rate = diffuse_rate >= 1.0f ? 0.999999f : diffuse_rate;
-
     thrust::uniform_real_distribution<float> u01(0, 1);
-    if (u01(rng) < diffuse_rate) {
-        // 漫反射 + Lambert公式
-        newray.direction = calculateRandomDirectionInHemisphere(normal, rng);
-        pathSegment.color *= m.color / diffuse_rate;
-        pathSegment.color *= glm::dot(newray.direction, normal);
-    } else {
-        // 镜面反射
+
+    if (m.hasRefractive) {
+        // 用Schlick近似计算折射
+        float n = m.indexOfRefraction;
+        float R_0 = ((n - 1) * (n - 1)) / ((n + 1) * (n + 1));
+        float X = 1 - glm::abs(glm::dot(pathSegment.ray.direction, normal));
+        float X_squared = X * X;
+        float R = R_0 + (1 - R_0) * (X * X_squared * X_squared);
+        if (u01(rng) > R) { // 折射
+            newray.direction = glm::refract(pathSegment.ray.direction, normal, n);
+            normal = -normal;
+        } else { // 反射
+            newray.direction = glm::reflect(pathSegment.ray.direction, normal);
+            pathSegment.color *= m.specular.color;
+        }
+    } else if(u01(rng)<m.hasReflective) { // 镜面反射
         newray.direction = glm::reflect(pathSegment.ray.direction, normal);
-        pathSegment.color *= m.specular.color / (1 - diffuse_rate);
+        pathSegment.color *= m.specular.color;
+    } else { // 漫反射
+        newray.direction = calculateRandomDirectionInHemisphere(normal, rng);
+        pathSegment.color *= m.color;
     }
-    pathSegment.ray = newray;
 }

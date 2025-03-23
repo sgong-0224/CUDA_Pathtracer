@@ -84,3 +84,47 @@ struct ShadeableIntersection
   glm::vec3 surfaceNormal;
   int materialId;
 };
+
+// 自定义的数据结构
+#include "boundingbox.h"
+class Triangle
+{
+public:
+    int id;
+    glm::vec3 vertices[3];
+    glm::vec3 surface_normal;
+    struct {
+        glm::vec3 min_corner;
+        glm::vec3 max_corner;
+    } BoundBox;
+
+    Triangle() {}
+
+    __host__ __device__
+    glm::vec3 get_bbox_center() const
+    {
+        return (BoundBox.min_corner + BoundBox.max_corner) / 2.0f;
+    }
+    __host__ __device__
+    float area()
+    {
+        return glm::length(glm::cross(vertices[1] - vertices[0], vertices[2] - vertices[0]));
+    }
+    __host__ __device__
+    void calculate_boundaries(glm::vec3& min, glm::vec3& max)
+    {
+        min.x = glm::min(glm::min(vertices[0].x, vertices[1].x), vertices[2].x);
+        min.y = glm::min(glm::min(vertices[0].y, vertices[1].y), vertices[2].y);
+        min.z = glm::min(glm::min(vertices[0].z, vertices[1].z), vertices[2].z);
+        max.x = glm::max(glm::max(vertices[0].x, vertices[1].x), vertices[2].x);
+        max.y = glm::max(glm::max(vertices[0].y, vertices[1].y), vertices[2].y);
+        max.z = glm::max(glm::max(vertices[0].z, vertices[1].z), vertices[2].z);
+    }
+    __host__ __device__
+    BoundingBox getBoundingBox()
+    {
+        glm::vec3 min(0.0f), max(0.0f);
+        calculate_boundaries(min, max);
+        return BoundingBox(min, max);
+    }
+};

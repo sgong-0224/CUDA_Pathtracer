@@ -233,15 +233,19 @@ void RenderImGui()
     //ImGui::SameLine();
     //ImGui::Text("counter = %d", counter);
     
-    ImGui::Begin("Path Tracer Analytics", 0, ImGuiWindowFlags_AlwaysAutoResize); // Create a window called "Hello, world!" and append into it.
+    ImGui::Begin("Path Tracer Analytics", nullptr, ImGuiWindowFlags_AlwaysAutoResize); // Create a window and append into it
     ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
     
     if (ImGui::CollapsingHeader("General settings:", ImGuiTreeNodeFlags_DefaultOpen)) {
         // 选项：俄罗斯轮盘终止算法
         ImGui::Checkbox("Russian roulette", &imguiData->russianRoulette);
+        // 选项：使用BVH树
+        ImGui::Checkbox("Enable BVH tree", &imguiData->useBVHtree);
         // 选项：聚集材质
         ImGui::Checkbox("Sort by material(can harm performance)", &imguiData->sortbyMaterial);
+        // 选项：使用thrust::partition消除终止路径
+        ImGui::Checkbox("Use thrust library for path termination", &imguiData->useThrustPartition);
     }
 
     ImGui::End();

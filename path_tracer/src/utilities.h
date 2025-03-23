@@ -21,7 +21,9 @@ public:
     int TracedDepth;
     // Options:
     bool russianRoulette{ true };
+    bool useBVHtree{ false };
     bool sortbyMaterial{ false };
+    bool useThrustPartition{ false };
 };
 
 namespace utilityCore
