@@ -98,6 +98,11 @@ set(imgui_sources
     src/ImGui/imgui_widgets.cpp
 )
 
+set(tinyobjloader
+    src/TinyObjLoader/tiny_obj_loader.cc
+    src/TinyObjLoader/tiny_obj_loader.h
+)
+
 list(SORT headers)
 list(SORT sources)
 list(SORT imgui_headers)
@@ -107,11 +112,12 @@ source_group("Headers" FILES ${headers})
 source_group("Sources" FILES ${sources})
 source_group("ImGui\\Headers" FILES ${imgui_headers})
 source_group("ImGui\\Sources" FILES ${imgui_sources})
+source_group("TinyObjLoader" FILES ${tinyobjloader})
 
 #add_subdirectory(src/ImGui)
 add_subdirectory(stream_compaction)  # TODO: uncomment if using your stream compaction
 
-add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
+add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers} ${imgui_sources} ${imgui_headers} ${tinyobjloader})
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 if(CMAKE_VERSION VERSION_LESS "3.23.0")
     set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES OFF)
