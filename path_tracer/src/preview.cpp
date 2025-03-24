@@ -15,6 +15,9 @@ GuiDataContainer* imguiData = NULL;
 ImGuiIO* io = nullptr;
 bool mouseOverImGuiWinow = false;
 
+// 需要重新加载
+bool visual_settings_changed = true;
+
 std::string currentTimeString()
 {
     time_t now;
@@ -247,6 +250,22 @@ void RenderImGui()
         // 选项：使用thrust::partition消除终止路径
         ImGui::Checkbox("Use thrust library for path termination", &imguiData->useThrustPartition);
     }
+    if (ImGui::CollapsingHeader("Visual settings:", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // 选项：随机采样抗锯齿
+        if (ImGui::Checkbox("Enable stochastic sampled antialiasing", &imguiData->SSAA)) 
+            visual_settings_changed = true;
+        // 选项: 景深效果、焦距、光圈大小
+        if (ImGui::Checkbox("Enable DoF effects", &imguiData->DoF))
+            visual_settings_changed = true;
+        if(!imguiData->DoF)
+            ImGui::BeginDisabled();
+        if (ImGui::SliderFloat("Aperture radius", &imguiData->aperture, 0.1f, 2.5f))
+            visual_settings_changed = true;
+        if (ImGui::SliderFloat("Focal distance", &imguiData->focal_len, 10.0f, 150.0f))
+            visual_settings_changed = true;
+        if (!imguiData->DoF)
+            ImGui::EndDisabled();
+    }
 
     ImGui::End();
 
@@ -267,7 +286,7 @@ void mainLoop()
     {
         glfwPollEvents();
 
-        runCuda();
+        runCuda(visual_settings_changed);
 
         string title = "Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
         glfwSetWindowTitle(window, title.c_str());

@@ -26,5 +26,6 @@ public:
     std::vector<Geom> geoms;
     std::vector<Material> materials;
     std::vector<Triangle> triangles;
+    std::vector<BoundingBox> bounding_boxes;
     RenderState state;
 };

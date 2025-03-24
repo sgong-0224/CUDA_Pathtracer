@@ -114,7 +114,8 @@ float sphereIntersectionTest(
     return glm::length(r.origin - intersectionPoint);
 }
 
-// 其他形状的碰撞检测
+// 其他形状的碰撞检测:
+// 网格: 遍历
 __host__ __device__ 
 float meshIntersectionTest(
     Geom mesh,
@@ -123,5 +124,28 @@ float meshIntersectionTest(
     Triangle* triangles
 )
 {
-    return 0.0f;
+    int min_ind = -1;	// the nearest triangle id
+    float tmin = FLT_MAX;
+    glm::vec3 barypos(0.0f), minbarypos(0.0f);
+
+    //traverse all the triangles
+    for (int i = mesh.tri_start_idx; i < mesh.tri_start_idx + mesh.n_tris; ++i) {
+        //the baryPosition output uses barycentric coordinates for the x and y components.The z component is the scalar factor for ray.
+        //That is, 1.0 - baryPosition.x - baryPosition.y = actual z barycentric coordinate
+        if (glm::intersectRayTriangle( r.origin, r.direction, 
+            triangles[i].vertices[0], triangles[i].vertices[1], triangles[i].vertices[2],  barypos)) {
+            if (barypos.z > 0.0f && barypos.z < tmin) {
+                min_ind = i;
+                tmin = barypos.z;
+                minbarypos = barypos;
+            }
+        }
+    }
+    //not hit anything
+    if (min_ind == -1)
+        return -1;
+    // TODO:
+
+    return -1;
 }
+// 网格：包围盒

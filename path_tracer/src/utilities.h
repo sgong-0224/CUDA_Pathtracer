@@ -24,6 +24,12 @@ public:
     bool useBVHtree{ false };
     bool sortbyMaterial{ false };
     bool useThrustPartition{ false };
+    // Visual Effects:
+    bool SSAA{ true };
+    // DoF: aperture, focal length?
+    bool DoF{ true };
+    float aperture{ 0.5f };
+    float focal_len{ 35.0f };
 };
 
 namespace utilityCore

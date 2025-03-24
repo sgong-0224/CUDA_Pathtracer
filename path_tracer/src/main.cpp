@@ -111,9 +111,9 @@ void saveImage()
     //img.saveHDR(filename);  // Save a Radiance HDR file
 }
 
-void runCuda()
+void runCuda( bool& visual_changed )
 {
-    if (camchanged)
+    if ( camchanged || visual_changed )
     {
         iteration = 0;
         Camera& cam = renderState->camera;
@@ -132,6 +132,7 @@ void runCuda()
         cameraPosition += cam.lookAt;
         cam.position = cameraPosition;
         camchanged = false;
+        visual_changed = false;
     }
 
     // Map OpenGL buffer object for writing from CUDA on a single GPU

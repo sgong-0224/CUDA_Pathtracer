@@ -74,7 +74,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
             // 单独处理网格
             newGeom.type = MESH;
             string filename = (cfg_path.parent_path()/"Models"/p["MESH_FILE"]).string();
-            triangles.clear();
+            newGeom.tri_start_idx = triangles.size();
             tinyobj::attrib_t attr;
             std::vector<tinyobj::shape_t> shapes;
             std::vector<tinyobj::material_t> materials;
@@ -105,7 +105,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
                     idx += fv;
                 }
             }
-            newGeom.n_tris = triangles.size();
+            newGeom.n_tris = triangles.size() - newGeom.tri_start_idx;
             const auto& trans = p["TRANS"];
             const auto& rotat = p["ROTAT"];
             const auto& scale = p["SCALE"];
@@ -125,6 +125,8 @@ void Scene::loadFromJSON(const std::string& jsonName)
                     newGeom.max_bound = glm::max(newGeom.max_bound, tri.vertices[i]);
                 }
             }
+            // TODO: scene boundingbox
+
         }
         else {
             if (type == "cube")

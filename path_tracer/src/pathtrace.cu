@@ -34,7 +34,23 @@ public:
     bool enable_SortbyMaterial;
     bool use_Thrust;
     bool use_BVHtree;
+    bool enable_SSAA;
+    bool enable_DoF;
+    float focal_dist;
+    float aperture;
 };
+// 设置选项
+void set(Settings& settings, GuiDataContainer* guidata)
+{
+    settings.enable_RussianRoulette = guidata->russianRoulette;
+    settings.enable_SortbyMaterial = guidata->sortbyMaterial;
+    settings.use_Thrust = guidata->useThrustPartition;
+    settings.use_BVHtree = guidata->useBVHtree;
+    settings.enable_SSAA = guidata->SSAA;
+    settings.enable_DoF = guidata->DoF;
+    settings.aperture = guidata->aperture;
+    settings.focal_dist = guidata->focal_len;
+}
 
 __host__ __device__
 thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
@@ -80,6 +96,10 @@ static Settings* dev_settings = NULL;
 static PathSegment* dev_paths_buf = NULL;
 static int* path_boolean_buf = NULL;
 static int* path_indices_buf = NULL;
+// Mesh & BVH
+static Triangle* dev_triangles = NULL;
+static BoundingBox* dev_boundingboxes = NULL;
+static BVHTree* bvh_tree_array = NULL;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -113,6 +133,10 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&path_boolean_buf, pixelcount * sizeof(int));
     cudaMalloc(&path_indices_buf, pixelcount * sizeof(int));
     // Bounding boxes & BVH trees
+    cudaMalloc(&dev_triangles, scene->triangles.size() * sizeof(Triangle));
+    cudaMemcpy(dev_triangles, scene->triangles.data(), scene->triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice);
+    cudaMalloc(&dev_boundingboxes, scene->bounding_boxes.size() * sizeof(BoundingBox));
+    cudaMemcpy(dev_boundingboxes, scene->bounding_boxes.data(), scene->bounding_boxes.size() * sizeof(BoundingBox), cudaMemcpyHostToDevice);
 
     checkCUDAError("pathtraceInit");
 }
@@ -130,7 +154,8 @@ void pathtraceFree()
     cudaFree(path_boolean_buf);
     cudaFree(path_indices_buf);
     // Bounding boxes & BVH trees
-
+    cudaFree(dev_triangles);
+    cudaFree(dev_boundingboxes);
     checkCUDAError("pathtraceFree");
 }
 
@@ -139,7 +164,7 @@ void pathtraceFree()
 //      抗锯齿 - 生成次像素采样的光线
 //      动态模糊 - 即时扰动光线
 //      镜头效果 - 根据镜头扰动光线起点
-__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments)
+__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, Settings* settings)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -155,11 +180,30 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
     thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, traceDepth);
     thrust::uniform_real_distribution<float> u01(0, 1);
 
-    segment.ray.direction = glm::normalize(cam.view
-        - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f + u01(rng))
-        - cam.up    * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f + u01(rng))
-    );
-
+    // 随机采样抗锯齿
+    if (settings->enable_SSAA) {
+        segment.ray.direction = glm::normalize(cam.view
+            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f + u01(rng))
+            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f + u01(rng))
+        );
+    } else {
+        segment.ray.direction = glm::normalize(cam.view
+            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
+            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
+        );
+    }
+    if (settings->enable_DoF) {
+        // 采样镜头光线
+        float r = u01(rng) * settings->aperture;
+        float theta = u01(rng) * 2 * PI;
+        glm::vec3 p_lens(r * cos(theta), r * sin(theta), 0.0f);
+        // 计算焦平面
+        float ft = settings->focal_dist / glm::abs(segment.ray.direction.z);
+        glm::vec3 p_focus = segment.ray.origin + ft * segment.ray.direction;
+        // 计算光线
+        segment.ray.origin += p_lens;
+        segment.ray.direction = glm::normalize(p_focus - segment.ray.origin);
+    }
     segment.pixelIndex = index;
     segment.remainingBounces = traceDepth;   
     segment.bounces = 0;
@@ -364,7 +408,11 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     // 1D block for path tracing
     const int blockSize1d = 128;
 
-    generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, iter, traceDepth, dev_paths);
+    Settings settings;
+    set(settings, guiData);
+    cudaMemcpy(dev_settings, &settings, sizeof(Settings), cudaMemcpyHostToDevice);
+
+    generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, iter, traceDepth, dev_paths, dev_settings);
     checkCUDAError("generate camera ray");
 
     int depth = 0;
@@ -380,12 +428,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         cudaStream_t copy_stream;
         cudaStreamCreate(&copy_stream);
         
-        // 设置选项
-        Settings settings;
-        settings.enable_RussianRoulette = guiData->russianRoulette;
-        settings.enable_SortbyMaterial = guiData->sortbyMaterial;
-        settings.use_Thrust = guiData->useThrustPartition;
-        settings.use_BVHtree = guiData->useBVHtree;
+        set(settings, guiData);
 
         cudaEvent_t ready_event;
         cudaMemcpyAsync(dev_settings, &settings, sizeof(Settings), cudaMemcpyHostToDevice, copy_stream);
