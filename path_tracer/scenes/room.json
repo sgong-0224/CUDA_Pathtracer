@@ -52,7 +52,7 @@
         "FOVY":45.0,
         "ITERATIONS":1024,
         "DEPTH":8,
-        "FILE":"cornell",
+        "FILE":"room",
         "EYE":[0.0,2.0,4.0],
         "LOOKAT":[-1.0,2.0,-2.0],
         "UP":[0.0,1.0,0.0]
@@ -128,7 +128,7 @@
         {
             "TYPE":"mesh",
             "MATERIAL":"diffuse_white_with_texture_c",
-            "TRANS":[4.0,0.5,2.0],
+            "TRANS":[-4.0,0.5,2.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[0.5,0.5,0.5],
 			"MESH_FILE":"chair.obj"

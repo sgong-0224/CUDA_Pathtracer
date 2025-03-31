@@ -52,15 +52,24 @@ void Scene::loadFromJSON(const std::string& jsonName)
         newMaterial.hasReflective = p.value("REFLECTIVE",0.0f);
         newMaterial.emittance = p.value("EMITTANCE",0.0f);
         newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+        const auto& texture_path = p.value("TEXTURE_FILE", string());
         newMaterial.specular.color = glm::vec3(spec_col[0], spec_col[1], spec_col[2]);
         MatNameToID[name] = materials.size();
         // 处理自定义纹理
         newMaterial.texture_id = -1;
-        if (p["TYPE"] == "Texture") {
-            // TODO
-            printf("texture\n");
-            string filename = (cfg_path.parent_path() / "Textures" / p["TEXTURE_FILE"]).string();
+        
+        if (!texture_path.empty()) {
+            string filename = (cfg_path.parent_path() / "Textures" / texture_path).string();
+            Texture texture;
+            bool status = texture.load(filename.c_str());
+            if (!status) {
+                std::cout << "Texture load error!\n";
+                exit(1);
+            }
+            newMaterial.texture_id = textures.size();
+            textures.emplace_back(texture);
         }
+        
         materials.emplace_back(newMaterial);
     }
 
@@ -84,27 +93,48 @@ void Scene::loadFromJSON(const std::string& jsonName)
                 std::cout << err << '\n';
             if (!status)
                 exit(1);
+
+            // 为图形加载三角形
+            auto& norm = attr.normals;
+            auto& texcoord = attr.texcoords;
+            auto& vertices = attr.vertices;
+
             omp_set_nested(1);
 #pragma omp parallel for
             for (size_t i = 0; i < shapes.size(); ++i) {
                 size_t idx = 0;
                 #pragma omp parallel for
                 for (size_t j = 0; j < shapes[i].mesh.num_face_vertices.size(); ++j) {
-                    int fv = shapes[i].mesh.num_face_vertices[j];
-                    // 根据顶点构建三角形
+                    size_t fv = shapes[i].mesh.num_face_vertices[j];
                     Triangle tri;
                     for (size_t v = 0; v < fv; ++v) {
                         tinyobj::index_t mesh_id = shapes[i].mesh.indices[idx + v];
+                        
                         tinyobj::real_t vx = attr.vertices[3 * mesh_id.vertex_index + 0];
                         tinyobj::real_t vy = attr.vertices[3 * mesh_id.vertex_index + 1];
                         tinyobj::real_t vz = attr.vertices[3 * mesh_id.vertex_index + 2];
                         tri.vertices[v] = glm::vec3(vx, vy, vz);
+
+                        if(mesh_id.normal_index >= 0){
+                            tinyobj::real_t norm_x = attr.normals[3 * mesh_id.normal_index + 0];
+                            tinyobj::real_t norm_y = attr.normals[3 * mesh_id.normal_index + 1];
+                            tinyobj::real_t norm_z = attr.normals[3 * mesh_id.normal_index + 2];
+                            tri.vertex_normals[v] = glm::vec3(norm_x, norm_y, norm_z);
+                        }
+                        
+                        if (mesh_id.texcoord_index >= 0) {
+                            tinyobj::real_t texcoord_u = attr.texcoords[2 * mesh_id.texcoord_index + 0];
+                            tinyobj::real_t texcoord_v = attr.texcoords[2 * mesh_id.texcoord_index + 1];
+                            tri.vertices_texture_coord[v] = glm::vec2(texcoord_u, texcoord_v);
+                        }
                     }
+                    idx += fv;
                     tri.surface_normal = glm::cross(tri.vertices[1] - tri.vertices[0], tri.vertices[2] - tri.vertices[0]);
                     triangles.emplace_back(tri);
-                    idx += fv;
                 }
             }
+
+            // 加载三角形
             newGeom.n_tris = triangles.size() - newGeom.tri_start_idx;
             const auto& trans = p["TRANS"];
             const auto& rotat = p["ROTAT"];
@@ -116,8 +146,8 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newGeom.min_bound = triangles[0].vertices[0];
             newGeom.max_bound = triangles[0].vertices[0];
             for (auto& tri : triangles) {
-#pragma omp simd
                 for (int i = 0; i < 3; ++i) {
+                    // 对mesh, 将缩放应用到三角形上，全部完成后还原几何体本身的缩放
                     tri.vertices[i].x *= newGeom.scale[0];
                     tri.vertices[i].y *= newGeom.scale[1];
                     tri.vertices[i].z *= newGeom.scale[2];
@@ -125,6 +155,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
                     newGeom.max_bound = glm::max(newGeom.max_bound, tri.vertices[i]);
                 }
             }
+            newGeom.scale = glm::vec3(1.0f);
             // TODO: scene boundingbox
 
         }
@@ -145,7 +176,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newGeom.translation, newGeom.rotation, newGeom.scale);
         newGeom.inverseTransform = glm::inverse(newGeom.transform);
         newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
-        geoms.push_back(newGeom);
+        geoms.emplace_back(newGeom);
     }
 
     // Camera

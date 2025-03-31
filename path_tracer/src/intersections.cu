@@ -118,34 +118,46 @@ float sphereIntersectionTest(
 // 网格: 遍历
 __host__ __device__ 
 float meshIntersectionTest(
-    Geom mesh,
-    Ray r,
-    glm::vec3& normal,
-    Triangle* triangles
-)
+    glm::vec3& intersection_point, Geom mesh, Ray r, 
+    glm::vec2& texture_coord, glm::vec3& normal, 
+    Triangle* triangles, bool& from_outside)
 {
-    int min_ind = -1;	// the nearest triangle id
+    // 计算mesh上的光线
+    glm::vec3 ray_origin = multiplyMV(mesh.inverseTransform, glm::vec4(r.origin, 1.0f));
+    glm::vec3 ray_direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(r.direction, 0.0f)));
+    Ray ray{ ray_origin,ray_direction };
+    int min_idx = -1;
     float tmin = FLT_MAX;
     glm::vec3 barypos(0.0f), minbarypos(0.0f);
-
-    //traverse all the triangles
     for (int i = mesh.tri_start_idx; i < mesh.tri_start_idx + mesh.n_tris; ++i) {
-        //the baryPosition output uses barycentric coordinates for the x and y components.The z component is the scalar factor for ray.
-        //That is, 1.0 - baryPosition.x - baryPosition.y = actual z barycentric coordinate
-        if (glm::intersectRayTriangle( r.origin, r.direction, 
-            triangles[i].vertices[0], triangles[i].vertices[1], triangles[i].vertices[2],  barypos)) {
+        auto& t = triangles[i];
+        // 重心坐标 barypos:
+        // The baryPosition output uses barycentric coordinates for the x and y components.The z component is the scalar factor for ray.
+        // That is, 1.0 - baryPosition.x - baryPosition.y = actual z barycentric coordinate
+        if (glm::intersectRayTriangle( 
+            ray.origin, ray.direction, t.vertices[0], t.vertices[1], t.vertices[2], barypos
+        )) {
             if (barypos.z > 0.0f && barypos.z < tmin) {
-                min_ind = i;
+                min_idx = i;
                 tmin = barypos.z;
                 minbarypos = barypos;
             }
         }
     }
-    //not hit anything
-    if (min_ind == -1)
-        return -1;
-    // TODO:
-
-    return -1;
+    if (min_idx == -1)
+        return -1.0f;
+    // 发生交叉，计算纹理坐标，用Triangle的vertices_texture_coord字段
+    auto actual_z = 1.0f - minbarypos.x - minbarypos.y;
+    auto& tri = triangles[min_idx];
+    normal = actual_z * tri.vertex_normals[0] + tri.vertex_normals[1] + tri.vertex_normals[2];
+    normal = glm::normalize(normal);
+    texture_coord = actual_z * tri.vertices_texture_coord[0] + tri.vertices_texture_coord[1] + tri.vertices_texture_coord[2];
+    return tmin;
 }
 // 网格：包围盒
+__host__ __device__
+float IntersectBVH(glm::vec3& intersection_point, Geom mesh, Ray r, glm::vec3& normal, Triangle* triangles, bool& from_outside)
+{
+    // TODO: 
+    return -1.0f;
+}

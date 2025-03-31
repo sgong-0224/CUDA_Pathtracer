@@ -8,7 +8,7 @@
 #include "utilities.h"
 #include "sceneStructs.h"
 
-#include "TinyObjLoader/tiny_obj_loader.h"
+#include "tiny_obj_loader.h"
 #include "boundingbox.h"
 #include "BVH_tree.h"
 
@@ -27,5 +27,6 @@ public:
     std::vector<Material> materials;
     std::vector<Triangle> triangles;
     std::vector<BoundingBox> bounding_boxes;
+    std::vector<Texture> textures;
     RenderState state;
 };

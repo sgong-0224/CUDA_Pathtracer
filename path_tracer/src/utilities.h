@@ -28,8 +28,8 @@ public:
     bool SSAA{ true };
     // DoF: aperture, focal length?
     bool DoF{ true };
-    float aperture{ 0.5f };
-    float focal_len{ 35.0f };
+    float aperture{ 0.2f };
+    float focal_len{ 24.0f };
 };
 
 namespace utilityCore

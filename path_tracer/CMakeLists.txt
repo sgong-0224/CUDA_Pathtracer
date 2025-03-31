@@ -9,10 +9,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Enable C++11 for host code
-set(CMAKE_CXX_STANDARD 11)
+# Enable C++20 for host code
+set(CMAKE_CXX_STANDARD 17)
 if(NOT DEFINED CMAKE_CUDA_STANDARD)
-    set(CMAKE_CUDA_STANDARD 11)
+    set(CMAKE_CUDA_STANDARD 17)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 endif()
 
@@ -61,6 +61,8 @@ set(headers
     src/sceneStructs.h
     src/preview.h
     src/utilities.h
+    src/BVH_tree.h
+    src/boundingbox.h
 )
 
 set(sources
@@ -74,6 +76,7 @@ set(sources
     src/scene.cpp
     src/preview.cpp
     src/utilities.cpp
+    src/BVH_tree.cpp
 )
 
 set(imgui_headers
@@ -99,8 +102,7 @@ set(imgui_sources
 )
 
 set(tinyobjloader
-    src/TinyObjLoader/tiny_obj_loader.cc
-    src/TinyObjLoader/tiny_obj_loader.h
+    src/tiny_obj_loader.h
 )
 
 list(SORT headers)

@@ -100,6 +100,8 @@ static int* path_indices_buf = NULL;
 static Triangle* dev_triangles = NULL;
 static BoundingBox* dev_boundingboxes = NULL;
 static BVHTree* bvh_tree_array = NULL;
+// Texture Mapping
+static Texture* dev_textures = NULL;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -137,6 +139,15 @@ void pathtraceInit(Scene* scene)
     cudaMemcpy(dev_triangles, scene->triangles.data(), scene->triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice);
     cudaMalloc(&dev_boundingboxes, scene->bounding_boxes.size() * sizeof(BoundingBox));
     cudaMemcpy(dev_boundingboxes, scene->bounding_boxes.data(), scene->bounding_boxes.size() * sizeof(BoundingBox), cudaMemcpyHostToDevice);
+    // Textures
+    cudaMalloc(&dev_textures, scene->textures.size() * sizeof(Texture));
+    for (auto& texture:scene->textures) {
+        auto [ _, w, h, n_com, __,___ ] = texture;
+        int n_bytes = w * h * n_com;
+        cudaMalloc(&texture.dev_image, n_bytes * sizeof(unsigned char));
+        cudaMemcpy(texture.dev_image, texture.image, n_bytes * sizeof(unsigned char), cudaMemcpyHostToDevice);
+    }
+    cudaMemcpy(dev_textures, scene->textures.data(), scene->textures.size() * sizeof(Texture), cudaMemcpyHostToDevice);
 
     checkCUDAError("pathtraceInit");
 }
@@ -156,6 +167,8 @@ void pathtraceFree()
     // Bounding boxes & BVH trees
     cudaFree(dev_triangles);
     cudaFree(dev_boundingboxes);
+    cudaFree(dev_textures);
+
     checkCUDAError("pathtraceFree");
 }
 
@@ -210,23 +223,26 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 }
 
 // 计算路径交点
-__global__ void computeIntersections( int depth, int num_paths, PathSegment* pathSegments, 
-    Geom* geoms, int geoms_size, ShadeableIntersection* intersections, Settings* settings)
+__global__ void computeIntersections( int depth, int num_paths, PathSegment* pathSegments,  Geom* geoms, int geoms_size, 
+    ShadeableIntersection* intersections, Triangle* triangles, BoundingBox* bounds, Settings* settings)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (path_index >= num_paths)
         return;
-    PathSegment pathSegment = pathSegments[path_index];
+    PathSegment& pathSegment = pathSegments[path_index];
 
     float t;
     glm::vec3 intersect_point;
     glm::vec3 normal;
+    // coord：2维纹理坐标，取值为[0,1]
+    glm::vec2 coord;
     float t_min = FLT_MAX;
     int hit_geom_index = -1;
     bool outside = true;
     glm::vec3 tmp_intersect;
     glm::vec3 tmp_normal;
+    glm::vec2 tmp_coord;
 
     // naive parse through global geoms
     for (int i = 0; i < geoms_size; ++i){
@@ -236,20 +252,21 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
         else if (geom.type == SPHERE)
             t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
         // TODO: add more intersection tests here... triangle? metaball? CSG?
-        // 碰撞检测
+        // 碰撞检测：网孔
         else if (geom.type == MESH) {
             if (settings->use_BVHtree)
                 (void)0;
             else
-                (void)1;
-                // t = meshIntersectionTest();
+                t = meshIntersectionTest(tmp_intersect, geom, pathSegment.ray, tmp_coord, tmp_normal, triangles, outside);
         }
         // Compute the minimum t from the intersection tests to determine what
         // scene geometry object was hit first.
+
         if (t > 0.0f && t_min > t){
                 t_min = t;
                 hit_geom_index = i;
                 intersect_point = tmp_intersect;
+                coord = tmp_coord;
                 normal = tmp_normal;
         }
     }
@@ -260,59 +277,54 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
         // The ray hits something
         intersections[path_index].t = t_min;
         intersections[path_index].materialId = geoms[hit_geom_index].materialid;
+        intersections[path_index].texture_coord = coord;
         intersections[path_index].surfaceNormal = normal;
     }
 }
 
 // 着色器实现，处理BSDF
-__device__ void calc_segment(int iter, int idx, Settings* settings,  ShadeableIntersection& intersection, 
-                             PathSegment& segment, Material* materials);
 __global__ void shadeMaterials( int iter, int num_paths, Settings* settings, ShadeableIntersection* shadeableIntersections,
-                                PathSegment* pathSegments, Material* materials)
+                                PathSegment* pathSegments, Material* materials, Texture* textures)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_paths)
         return;
     auto& path_segment = pathSegments[idx];
     auto& shade_intersect = shadeableIntersections[idx];
-    calc_segment(iter, idx, settings, shade_intersect, path_segment, materials);
-}
-__device__ void calc_segment(int iter, int idx, Settings* settings, ShadeableIntersection& intersection,
-                             PathSegment& segment, Material* materials)
-{
-    if (intersection.t <= 0.0f) {
-        segment.color = glm::vec3(0.0f);
-        segment.remainingBounces = 0;
+    if (shade_intersect.t <= 0.0f) {
+        path_segment.color = glm::vec3(0.0f);
+        path_segment.remainingBounces = 0;
         return;
     }
     thrust::uniform_real_distribution<float> u01(0, 1);
-    thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, segment.remainingBounces);
-    auto& material = materials[intersection.materialId];
+    thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, path_segment.remainingBounces);
+    auto& material = materials[shade_intersect.materialId];
+
     if (material.emittance > 0.0f) {
-        segment.color *= material.color * material.emittance;
-        segment.remainingBounces = 0;
+        path_segment.color *= material.color * material.emittance;
+        path_segment.remainingBounces = 0;
         return;
     }
-    scatterRay(segment, getPointOnRay(segment.ray, intersection.t), intersection.surfaceNormal, material, rng);
-    segment.bounces += 1;
-    if (--segment.remainingBounces == 0) {
-        segment.color = glm::vec3(0.0f);
+    scatterRay(path_segment, getPointOnRay(path_segment.ray, shade_intersect.t), shade_intersect, material, textures, rng);
+    path_segment.bounces += 1;
+    if (--path_segment.remainingBounces == 0) {
+        path_segment.color = glm::vec3(0.0f);
         return;
     }
     // 俄罗斯轮盘算法
-    if (settings->enable_RussianRoulette && segment.bounces > 3) {
+    if (settings->enable_RussianRoulette && path_segment.bounces > 3) {
         const auto luma_vec = glm::vec3(0.2126, 0.7152, 0.0722);
-        float segment_luma = glm::dot(segment.color, luma_vec);
+        float segment_luma = glm::dot(path_segment.color, luma_vec);
         // 终止概率：使用路径的当前颜色（累积反射率）来决定终止概率
         float q = glm::max(0.05f, 1 - segment_luma);
         if (u01(rng) < q) {
             // c = 0
-            segment.color = glm::vec3(0.0f);
-            segment.remainingBounces = 0;
+            path_segment.color = glm::vec3(0.0f);
+            path_segment.remainingBounces = 0;
             return;
         }
         // F -> (F-qc)/(1-q) = F/1-q
-        segment.color /= 1.0f - q;
+        path_segment.color /= 1.0f - q;
     }
 }
 
@@ -443,8 +455,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         cudaStreamDestroy(copy_stream);
 
         // 计算路径交点
-        computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> ( depth, num_remaining_paths, dev_paths, 
-            dev_geoms, hst_scene->geoms.size(), dev_intersections, dev_settings );
+        computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> ( depth, num_remaining_paths, dev_paths, dev_geoms, 
+            hst_scene->geoms.size(), dev_intersections, dev_triangles, dev_boundingboxes, dev_settings );
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
         depth += 1;
@@ -465,7 +477,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         // 调用着色器
         shadeMaterials<<<numblocksPathSegmentTracing, blockSize1d>>>( iter, num_remaining_paths, dev_settings,
-            dev_intersections, dev_paths, dev_materials );
+            dev_intersections, dev_paths, dev_materials, dev_textures );
         checkCUDAError("shade materials");
 
         // 移除终止的路径

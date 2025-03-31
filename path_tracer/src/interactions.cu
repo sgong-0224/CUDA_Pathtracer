@@ -43,16 +43,21 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
 __host__ __device__ void scatterRay(
     PathSegment & pathSegment,
     glm::vec3 intersect,
-    glm::vec3 normal,
+    ShadeableIntersection& intersection,
     const Material &m,
+    Texture* textures,
     thrust::default_random_engine &rng
 ){
     // TODO: implement this.
     // A basic implementation of pure-diffuse shading will just call the
     // calculateRandomDirectionInHemisphere defined above.
+    auto& normal = intersection.surfaceNormal;
+
     Ray& newray = pathSegment.ray;
-    newray.origin = intersect;
+    newray.origin = intersect + 0.0001f * normal;
     thrust::uniform_real_distribution<float> u01(0, 1);
+    
+    pathSegment.color *= m.texture_id != -1 ? textures[m.texture_id].get_color(intersection.texture_coord) : m.color;
 
     if (m.hasRefractive) {
         // ”√SchlickΩ¸À∆º∆À„’€…‰
@@ -61,9 +66,10 @@ __host__ __device__ void scatterRay(
         float X = 1 - glm::abs(glm::dot(pathSegment.ray.direction, normal));
         float X_squared = X * X;
         float R = R_0 + (1 - R_0) * (X * X_squared * X_squared);
-        if (u01(rng) > R) { // ’€…‰
+        if (R < u01(rng)) { // ’€…‰
             newray.direction = glm::refract(pathSegment.ray.direction, normal, n);
             normal = -normal;
+            pathSegment.color *= m.color;
         } else { // ∑¥…‰
             newray.direction = glm::reflect(pathSegment.ray.direction, normal);
             pathSegment.color *= m.specular.color;
@@ -73,6 +79,7 @@ __host__ __device__ void scatterRay(
         pathSegment.color *= m.specular.color;
     } else { // ¬˛∑¥…‰
         newray.direction = calculateRandomDirectionInHemisphere(normal, rng);
-        pathSegment.color *= m.color;
     }
+    pathSegment.color *= m.color;
+    glm::clamp(pathSegment.color, glm::vec3(0.0f), glm::vec3(1.0f));
 }

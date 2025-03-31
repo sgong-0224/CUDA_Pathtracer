@@ -259,9 +259,9 @@ void RenderImGui()
             visual_settings_changed = true;
         if(!imguiData->DoF)
             ImGui::BeginDisabled();
-        if (ImGui::SliderFloat("Aperture radius", &imguiData->aperture, 0.1f, 2.5f))
+        if (ImGui::SliderFloat("Aperture radius", &imguiData->aperture, 0.1f, 1.0f))
             visual_settings_changed = true;
-        if (ImGui::SliderFloat("Focal distance", &imguiData->focal_len, 10.0f, 150.0f))
+        if (ImGui::SliderFloat("Focal distance", &imguiData->focal_len, 10.0f, 80.0f))
             visual_settings_changed = true;
         if (!imguiData->DoF)
             ImGui::EndDisabled();

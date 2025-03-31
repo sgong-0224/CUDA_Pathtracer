@@ -4,6 +4,7 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include "glm/glm.hpp"
+#include <stb_image.h>
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
 
@@ -50,7 +51,7 @@ struct Material
     float indexOfRefraction;
     float emittance;
     // 自定义纹理:
-    int texture_id;
+    int texture_id{ -1 };
 };
 
 struct Camera
@@ -91,6 +92,8 @@ struct ShadeableIntersection
   float t;
   glm::vec3 surfaceNormal;
   int materialId;
+  // 纹理坐标，两个维度取值范围都是[0,1]
+  glm::vec2 texture_coord;
 };
 
 // 自定义的数据结构
@@ -100,6 +103,8 @@ class Triangle
 public:
     int id;
     glm::vec3 vertices[3];
+    glm::vec2 vertices_texture_coord[3];
+    glm::vec3 vertex_normals[3];
     glm::vec3 surface_normal;
     struct {
         glm::vec3 min_corner;
@@ -138,5 +143,30 @@ public:
 };
 class Texture {
 public:
-    int id;
+    int id{ -1 };
+    int width{ -1 };
+    int height{ -1 };
+    int components{ -1 };
+    unsigned char* image{ NULL };
+    unsigned char* dev_image{ NULL };
+
+    bool load(const char* filename) {
+        if (image = stbi_load(filename, &width, &height, &components, 0))
+            return true;
+        return false;
+    }
+    __host__ __device__ glm::vec3 get_color(glm::vec2& texture_coord)
+    {
+        int X = glm::min(1.f * width * texture_coord.x, 1.f * width - 1.0f);
+        int Y = glm::min(1.f * height * (1.0f - texture_coord.y), 1.f * height - 1.0f);
+        int texid = Y * width + X;
+        if (components == 3) {
+            glm::vec3 col = glm::vec3(dev_image[texid * components],
+                dev_image[texid * components + 1],
+                dev_image[texid * components + 2]);
+            col = 0.003921568627f * col;
+            return col;
+        }
+        return glm::vec3(0.0f);
+    }
 };
