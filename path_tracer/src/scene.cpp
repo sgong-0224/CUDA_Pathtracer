@@ -82,25 +82,23 @@ void Scene::loadFromJSON(const std::string& jsonName)
         if (type == "mesh") {   
             // 单独处理网格
             newGeom.type = MESH;
-            string filename = (cfg_path.parent_path()/"Models"/p["MESH_FILE"]).string();
+            string obj_filename = (cfg_path.parent_path()/"Models"/p["OBJ_FILE"]).string();
             newGeom.tri_start_idx = triangles.size();
             tinyobj::attrib_t attr;
             std::vector<tinyobj::shape_t> shapes;
             std::vector<tinyobj::material_t> materials;
             std::string err;
-            bool status = tinyobj::LoadObj(&attr, &shapes, &materials, &err, filename.c_str());
+            bool status = tinyobj::LoadObj(&attr, &shapes, &materials, &err, obj_filename.c_str());
             if (!err.empty())
                 std::cout << err << '\n';
             if (!status)
                 exit(1);
 
-            // 为图形加载三角形
+            // 填充三角形信息
             auto& norm = attr.normals;
             auto& texcoord = attr.texcoords;
             auto& vertices = attr.vertices;
 
-            omp_set_nested(1);
-#pragma omp parallel for
             for (size_t i = 0; i < shapes.size(); ++i) {
                 size_t idx = 0;
                 #pragma omp parallel for
@@ -134,7 +132,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
                 }
             }
 
-            // 加载三角形
+            // 填充几何体信息
             newGeom.n_tris = triangles.size() - newGeom.tri_start_idx;
             const auto& trans = p["TRANS"];
             const auto& rotat = p["ROTAT"];
@@ -145,14 +143,15 @@ void Scene::loadFromJSON(const std::string& jsonName)
             // 计算BoundingBox
             newGeom.min_bound = triangles[0].vertices[0];
             newGeom.max_bound = triangles[0].vertices[0];
-            for (auto& tri : triangles) {
-                for (int i = 0; i < 3; ++i) {
+            for (auto i = newGeom.tri_start_idx; i < newGeom.tri_start_idx + newGeom.n_tris; ++i ) {
+                for (int j = 0; j < 3; ++j) {
                     // 对mesh, 将缩放应用到三角形上，全部完成后还原几何体本身的缩放
-                    tri.vertices[i].x *= newGeom.scale[0];
-                    tri.vertices[i].y *= newGeom.scale[1];
-                    tri.vertices[i].z *= newGeom.scale[2];
-                    newGeom.min_bound = glm::min(newGeom.min_bound, tri.vertices[i]);
-                    newGeom.max_bound = glm::max(newGeom.max_bound, tri.vertices[i]);
+                    auto& tri = triangles[i];
+                    tri.vertices[j].x *= newGeom.scale[0];
+                    tri.vertices[j].y *= newGeom.scale[1];
+                    tri.vertices[j].z *= newGeom.scale[2];
+                    newGeom.min_bound = glm::min(newGeom.min_bound, tri.vertices[j]);
+                    newGeom.max_bound = glm::max(newGeom.max_bound, tri.vertices[j]);
                 }
             }
             newGeom.scale = glm::vec3(1.0f);
