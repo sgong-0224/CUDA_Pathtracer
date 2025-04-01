@@ -47,8 +47,8 @@ void Scene::loadFromJSON(const std::string& jsonName)
         // TODO: handle materials loading
         const std::vector<float> default_color = { 0.0f,0.0f,0.0f };
         const auto& col = p.value("RGB", default_color);
-        const auto& spec_col = p.value("SPECRGB", default_color);
-        newMaterial.specular.exponent = p.value("SPECEX",0.0f);
+        const auto& spec_col = p.value("SPECRGB", col);
+        newMaterial.specular.exponent = p.value("SPECEX",1.0f);
         newMaterial.hasReflective = p.value("REFLECTIVE",0.0f);
         newMaterial.emittance = p.value("EMITTANCE",0.0f);
         newMaterial.color = glm::vec3(col[0], col[1], col[2]);

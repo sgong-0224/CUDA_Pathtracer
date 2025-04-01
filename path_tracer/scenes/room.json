@@ -48,14 +48,14 @@
     },
     "Camera":
     {
-        "RES":[600,600],
+        "RES":[800,800],
         "FOVY":45.0,
-        "ITERATIONS":1024,
+        "ITERATIONS":1500,
         "DEPTH":8,
         "FILE":"room",
-        "EYE":[0.0,2.0,4.0],
-        "LOOKAT":[-1.0,2.0,-2.0],
-        "UP":[0.0,1.0,0.0]
+        "EYE":[-2.0,-1.0,1.0],
+        "LOOKAT":[-1.0,2.5,-2.0],
+        "UP":[0.0,-2.0,0.0]
     },
     "Objects":
     [
@@ -104,9 +104,9 @@
         {
             "TYPE":"mesh",
             "MATERIAL":"diffuse_white_with_texture_w",
-            "TRANS":[0.0,3.9,-4.8],
+            "TRANS":[0.0,5.0,-4.8],
             "ROTAT":[90.0,0.0,0.0],
-            "SCALE":[12.0,2.0,12.0],
+            "SCALE":[5.0,10.0,5.0],
 			"OBJ_FILE":"wall_x.obj"
         },
         {
