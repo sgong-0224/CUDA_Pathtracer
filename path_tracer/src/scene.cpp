@@ -77,8 +77,17 @@ void Scene::loadFromJSON(const std::string& jsonName)
     const auto& objectsData = data["Objects"];
     for (const auto& p : objectsData)
     {
-        const auto& type = p["TYPE"];
         Geom newGeom;
+        // 填充几何体信息
+        newGeom.materialid = MatNameToID[p["MATERIAL"]];
+        const auto& trans = p["TRANS"];
+        const auto& rotat = p["ROTAT"];
+        const auto& scale = p["SCALE"];
+        newGeom.translation = glm::vec3(trans[0], trans[1], trans[2]);
+        newGeom.rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
+        newGeom.scale = glm::vec3(scale[0], scale[1], scale[2]);
+
+        const auto& type = p["TYPE"];
         if (type == "mesh") {   
             // 单独处理网格
             newGeom.type = MESH;
@@ -132,14 +141,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
                 }
             }
 
-            // 填充几何体信息
             newGeom.n_tris = triangles.size() - newGeom.tri_start_idx;
-            const auto& trans = p["TRANS"];
-            const auto& rotat = p["ROTAT"];
-            const auto& scale = p["SCALE"];
-            newGeom.translation = glm::vec3(trans[0], trans[1], trans[2]);
-            newGeom.rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
-            newGeom.scale = glm::vec3(scale[0], scale[1], scale[2]);
             // 计算BoundingBox
             newGeom.min_bound = triangles[0].vertices[0];
             newGeom.max_bound = triangles[0].vertices[0];
@@ -156,23 +158,15 @@ void Scene::loadFromJSON(const std::string& jsonName)
             }
             newGeom.scale = glm::vec3(1.0f);
             // TODO: scene boundingbox
-
+            
         }
         else {
             if (type == "cube")
                 newGeom.type = CUBE;
             else if (type == "sphere")
                 newGeom.type = SPHERE;
-            const auto& trans = p["TRANS"];
-            const auto& rotat = p["ROTAT"];
-            const auto& scale = p["SCALE"];
-            newGeom.translation = glm::vec3(trans[0], trans[1], trans[2]);
-            newGeom.rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
-            newGeom.scale = glm::vec3(scale[0], scale[1], scale[2]);
         }
-        newGeom.materialid = MatNameToID[p["MATERIAL"]];
-        newGeom.transform = utilityCore::buildTransformationMatrix(
-            newGeom.translation, newGeom.rotation, newGeom.scale);
+        newGeom.transform = utilityCore::buildTransformationMatrix(newGeom.translation, newGeom.rotation, newGeom.scale);
         newGeom.inverseTransform = glm::inverse(newGeom.transform);
         newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
         geoms.emplace_back(newGeom);
@@ -211,4 +205,6 @@ void Scene::loadFromJSON(const std::string& jsonName)
     int arraylen = camera.resolution.x * camera.resolution.y;
     state.image.resize(arraylen);
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
+    // build BVH Tree
+    bvh_tree = build_bvh_tree(n_bvh_nodes, triangles);
 }

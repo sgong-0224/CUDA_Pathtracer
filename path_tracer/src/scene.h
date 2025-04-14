@@ -22,6 +22,9 @@ private:
 public:
     Scene(string filename);
     ~Scene();
+    
+    BVHTree* bvh_tree{ nullptr };
+    int n_bvh_nodes = 0;
 
     std::vector<Geom> geoms;
     std::vector<Material> materials;
