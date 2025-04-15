@@ -120,12 +120,30 @@ __host__ __device__
 float meshIntersectionTest(
     glm::vec3& intersection_point, Geom mesh, Ray r, 
     glm::vec2& texture_coord, glm::vec3& normal, 
-    Triangle* triangles, bool& from_outside)
+    Triangle* triangles, bool& from_outside,
+    bool use_boundingbox
+)
 {
     // 计算mesh上的光线
     glm::vec3 ray_origin = multiplyMV(mesh.inverseTransform, glm::vec4(r.origin, 1.0f));
     glm::vec3 ray_direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(r.direction, 0.0f)));
     Ray ray{ ray_origin,ray_direction };
+
+    if ( use_boundingbox ) {
+        // 快速检测，和 Boundingbox::intersect 一样的方法
+        glm::vec3 inv_direction{ 1.0f / r.direction.x, 1.0f / r.direction.y, 1.0f / r.direction.z };
+        float mx = (mesh.min_bound.x - ray.origin.x) * inv_direction.x;
+        float Mx = (mesh.max_bound.x - ray.origin.x) * inv_direction.x;
+        float my = (mesh.min_bound.y - ray.origin.y) * inv_direction.y;
+        float My = (mesh.max_bound.y - ray.origin.y) * inv_direction.y;
+        float mz = (mesh.min_bound.z - ray.origin.z) * inv_direction.z;
+        float Mz = (mesh.max_bound.z - ray.origin.z) * inv_direction.z;
+        float min = glm::max(glm::max(glm::min(mx, Mx), glm::min(my, My)), glm::min(mz, Mz));
+        float Max = glm::min(glm::min(glm::max(mx, Mx), glm::max(my, My)), glm::max(mz, Mz));
+        if (Max < 0 || min > Max)
+            return -1.0f;
+    }
+
     int min_idx = -1;
     float tmin = FLT_MAX;
     glm::vec3 barypos(0.0f), minbarypos(0.0f);
@@ -154,10 +172,61 @@ float meshIntersectionTest(
     texture_coord = actual_z * tri.vertices_texture_coord[0] + tri.vertices_texture_coord[1] + tri.vertices_texture_coord[2];
     return tmin;
 }
-// 网格：包围盒
+// BVH树碰撞检测
 __host__ __device__
-float IntersectBVH(glm::vec3& intersection_point, Geom mesh, Ray r, glm::vec3& normal, Triangle* triangles, bool& from_outside)
+bool BVHIntersectionTest(const Ray& r, int& hit_tri_id, ShadeableIntersection& isec,
+    BVHTree* bvh_nodes, Triangle* triangles)
 {
-    // TODO: 
-    return -1.0f;
+    if (!bvh_nodes)
+        return false;
+    bool hit = false;
+
+    constexpr const int MAX_SEARCH_DEPTH = 64;
+    int next_node_offset = 0, curr_idx = 0;
+    int to_visit[MAX_SEARCH_DEPTH];
+    bool dir_neg[3] = { r.direction.x < 0.0f,r.direction.y < 0.0f,r.direction.z < 0.0f };
+    glm::vec3 inv_dir(1.0f / r.direction.x, 1.0f / r.direction.y, 1.0f / r.direction.z);
+
+    while (true) {
+        auto node = &bvh_nodes[curr_idx];
+        float tmp_t = 0.0f;
+        if (node->bounds.intersect(r, inv_dir)) {
+            if (node->sub_areas > 0) {
+                for (int i = 0; i < node->sub_areas; ++i) {
+                    ShadeableIntersection inter;
+                    if (triangles[node->first_area_idx + i].intersect(r, inter)) {
+                        hit = true;
+                        if ((isec.t == -1.0f) || (inter.t < isec.t)) {
+                            isec = inter;
+                            hit_tri_id = triangles[node->first_area_idx + i].id;
+                        }
+                    }
+                }
+                if (next_node_offset == 0)
+                    break;
+                curr_idx = to_visit[--next_node_offset];
+            }
+            else {
+                if (next_node_offset >= MAX_SEARCH_DEPTH) {
+                    curr_idx = to_visit[--next_node_offset];
+                    continue;
+                }
+                if (dir_neg[node->Axis]) {
+                    to_visit[next_node_offset++] = curr_idx + 1;
+                    curr_idx = node->RChild_idx;
+                }
+                else {
+                    to_visit[next_node_offset++] = node->RChild_idx;
+                    curr_idx = curr_idx + 1;
+                }
+            }
+        }
+        else {
+            if (next_node_offset == 0)
+                break;
+            curr_idx = to_visit[--next_node_offset];
+        }
+    }
+
+    return hit;
 }

@@ -33,6 +33,7 @@ public:
     bool enable_RussianRoulette;
     bool enable_SortbyMaterial;
     bool use_Thrust;
+    bool use_BoundingBoxTest;
     bool use_BVHtree;
     bool enable_SSAA;
     bool enable_DoF;
@@ -46,6 +47,7 @@ void set(Settings& settings, GuiDataContainer* guidata)
     settings.enable_SortbyMaterial = guidata->sortbyMaterial;
     settings.use_Thrust = guidata->useThrustPartition;
     settings.use_BVHtree = guidata->useBVHtree;
+    settings.use_BoundingBoxTest = guidata->useBBox;
     settings.enable_SSAA = guidata->SSAA;
     settings.enable_DoF = guidata->DoF;
     settings.aperture = guidata->aperture;
@@ -257,7 +259,7 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
             if (settings->use_BVHtree)
                 (void)0;
             else
-                t = meshIntersectionTest(tmp_intersect, geom, pathSegment.ray, tmp_coord, tmp_normal, triangles, outside);
+                t = meshIntersectionTest(tmp_intersect, geom, pathSegment.ray, tmp_coord, tmp_normal, triangles, outside, settings->use_BoundingBoxTest);
         }
         // Compute the minimum t from the intersection tests to determine what
         // scene geometry object was hit first.
@@ -458,8 +460,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> ( depth, num_remaining_paths, dev_paths, dev_geoms, 
             hst_scene->geoms.size(), dev_intersections, dev_triangles, dev_boundingboxes, dev_settings );
         checkCUDAError("trace one bounce");
-        cudaDeviceSynchronize();
         depth += 1;
+        cudaDeviceSynchronize();
         
         if (settings.enable_SortbyMaterial) {
             thrust::sort_by_key(
@@ -479,7 +481,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         shadeMaterials<<<numblocksPathSegmentTracing, blockSize1d>>>( iter, num_remaining_paths, dev_settings,
             dev_intersections, dev_paths, dev_materials, dev_textures );
         checkCUDAError("shade materials");
-
+        cudaDeviceSynchronize();
         // ÒÆ³ýÖÕÖ¹µÄÂ·¾¶
         if(settings.use_Thrust)
             num_remaining_paths =   thrust::stable_partition(
@@ -491,7 +493,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
                                                             dev_paths, dev_paths_buf, path_boolean_buf, path_indices_buf);   
         
         checkCUDAError("relocate terminated paths");
-
+        cudaDeviceSynchronize();
         if (guiData != NULL)
             guiData->TracedDepth = depth;
     }

@@ -4,6 +4,7 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include "glm/glm.hpp"
+#include "glm/gtx/intersect.hpp"
 #include <stb_image.h>
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
@@ -34,6 +35,7 @@ struct Geom
     // Mesh:
     int n_tris;
     int tri_start_idx;
+    int boundingbox_idx;
     glm::vec3 min_bound;
     glm::vec3 max_bound;
 };
@@ -139,6 +141,23 @@ public:
         glm::vec3 min(0.0f), max(0.0f);
         calculate_boundaries(min, max);
         return BoundingBox(min, max);
+    }
+
+    __host__ __device__
+    bool intersect(const Ray& r, ShadeableIntersection& i)
+    {
+        glm::vec3 barypos(0.0f);
+        if (glm::intersectRayTriangle(r.origin, r.direction,
+            vertices[0], vertices[1], vertices[2], barypos)) {
+            i.t = barypos.z;
+            i.texture_coord = vertices_texture_coord[0] * (1.0f - barypos.x - barypos.y) + vertices_texture_coord[1] * barypos.x + vertices_texture_coord[2] * barypos.y;
+            i.surfaceNormal = vertex_normals[0] * barypos.x + vertex_normals[1] * barypos.y + vertex_normals[2] * (1.0f - barypos.x - barypos.y);
+            i.surfaceNormal = glm::normalize(i.surfaceNormal);
+            return true;
+        } else {
+            i.t = -1.0f;
+            return false;
+        }
     }
 };
 class Texture {

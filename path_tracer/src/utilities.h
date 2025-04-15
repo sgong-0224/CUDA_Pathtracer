@@ -22,6 +22,7 @@ public:
     // Options:
     bool russianRoulette{ true };
     bool useBVHtree{ false };
+    bool useBBox{ false };
     bool sortbyMaterial{ false };
     bool useThrustPartition{ false };
     // Visual Effects:

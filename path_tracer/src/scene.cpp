@@ -93,6 +93,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newGeom.type = MESH;
             string obj_filename = (cfg_path.parent_path()/"Models"/p["OBJ_FILE"]).string();
             newGeom.tri_start_idx = triangles.size();
+            newGeom.boundingbox_idx = bounding_boxes.size();
             tinyobj::attrib_t attr;
             std::vector<tinyobj::shape_t> shapes;
             std::vector<tinyobj::material_t> materials;
@@ -158,7 +159,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
             }
             newGeom.scale = glm::vec3(1.0f);
             // TODO: scene boundingbox
-            
+            bounding_boxes.emplace_back(newGeom.min_bound, newGeom.max_bound);
         }
         else {
             if (type == "cube")

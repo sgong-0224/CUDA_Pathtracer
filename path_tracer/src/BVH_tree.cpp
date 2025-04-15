@@ -161,7 +161,7 @@ BVHTree* build_bvh_tree(int& n_nodes, std::vector<Triangle>& triangles)
 	std::vector<BVH_BBox> bounding_boxes(n_tris);
 	// 获取BoundingBox信息
 #pragma omp parallel for
-	for (int i = 0; i < n_nodes; ++i)
+	for (int i = 0; i < triangles.size(); ++i)
 		bounding_boxes[i] = BVH_BBox(i, triangles[i].getBoundingBox());
 	// 创建BVH树
 	std::vector<Triangle> ordered_triangles;
@@ -174,5 +174,5 @@ BVHTree* build_bvh_tree(int& n_nodes, std::vector<Triangle>& triangles)
 	int offset = 0;
 	traverse_bvh(root, tree, offset);
 	delete_bvh_tree(root);
-	return nullptr;
+	return tree;
 }

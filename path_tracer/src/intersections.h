@@ -5,6 +5,7 @@
 
 #include "sceneStructs.h"
 #include "utilities.h"
+#include "BVH_tree.h"
 
 /**
  * Handy-dandy hash function that provides seeds for random number generation.
@@ -77,4 +78,9 @@ __host__ __device__
 float meshIntersectionTest(
     glm::vec3& intersection_point, Geom mesh, Ray r,
     glm::vec2& texture_coord, glm::vec3& normal,
-    Triangle* triangles, bool& from_outside);
+    Triangle* triangles, bool& from_outside,
+    bool use_boundingbox
+);
+__host__ __device__
+bool BVHIntersectionTest(const Ray& r, int& hit_tri_id, ShadeableIntersection& isec,
+    BVHTree* bvh_nodes, Triangle* triangles);
