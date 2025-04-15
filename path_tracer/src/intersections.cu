@@ -131,7 +131,7 @@ float meshIntersectionTest(
 
     if ( use_boundingbox ) {
         // 快速检测，和 Boundingbox::intersect 一样的方法
-        glm::vec3 inv_direction{ 1.0f / r.direction.x, 1.0f / r.direction.y, 1.0f / r.direction.z };
+        glm::vec3 inv_direction{ 1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z };
         float mx = (mesh.min_bound.x - ray.origin.x) * inv_direction.x;
         float Mx = (mesh.max_bound.x - ray.origin.x) * inv_direction.x;
         float my = (mesh.min_bound.y - ray.origin.y) * inv_direction.y;
