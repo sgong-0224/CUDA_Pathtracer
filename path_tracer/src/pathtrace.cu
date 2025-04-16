@@ -101,7 +101,7 @@ static int* path_indices_buf = NULL;
 // Mesh & BVH
 static Triangle* dev_triangles = NULL;
 static BoundingBox* dev_boundingboxes = NULL;
-static BVHTree* bvh_tree_array = NULL;
+static BVHTree* dev_bvh_tree = NULL;
 // Texture Mapping
 static Texture* dev_textures = NULL;
 
@@ -141,6 +141,8 @@ void pathtraceInit(Scene* scene)
     cudaMemcpy(dev_triangles, scene->triangles.data(), scene->triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice);
     cudaMalloc(&dev_boundingboxes, scene->bounding_boxes.size() * sizeof(BoundingBox));
     cudaMemcpy(dev_boundingboxes, scene->bounding_boxes.data(), scene->bounding_boxes.size() * sizeof(BoundingBox), cudaMemcpyHostToDevice);
+    cudaMalloc(&dev_bvh_tree, scene->n_bvh_nodes * sizeof(BVHTree));
+    cudaMemcpy(dev_bvh_tree, scene->bvh_tree, scene->n_bvh_nodes * sizeof(BVHTree), cudaMemcpyHostToDevice);
     // Textures
     cudaMalloc(&dev_textures, scene->textures.size() * sizeof(Texture));
     for (auto& texture:scene->textures) {
@@ -170,7 +172,7 @@ void pathtraceFree()
     cudaFree(dev_triangles);
     cudaFree(dev_boundingboxes);
     cudaFree(dev_textures);
-
+    cudaFree(dev_bvh_tree);
     checkCUDAError("pathtraceFree");
 }
 
@@ -226,7 +228,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
 // 计算路径交点
 __global__ void computeIntersections( int depth, int num_paths, PathSegment* pathSegments,  Geom* geoms, int geoms_size, 
-    ShadeableIntersection* intersections, Triangle* triangles, BoundingBox* bounds, Settings* settings)
+    ShadeableIntersection* intersections, Triangle* triangles, BoundingBox* bounds, BVHTree* bvh_tree, Settings* settings)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -241,6 +243,7 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
     glm::vec2 coord;
     float t_min = FLT_MAX;
     int hit_geom_index = -1;
+    int hit_tri_index = -1;
     bool outside = true;
     glm::vec3 tmp_intersect;
     glm::vec3 tmp_normal;
@@ -256,10 +259,20 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
         // TODO: add more intersection tests here... triangle? metaball? CSG?
         // 碰撞检测：网孔
         else if (geom.type == MESH) {
-            if (settings->use_BVHtree)
-                (void)0;
-            else
+            if (settings->use_BVHtree) {
+                ShadeableIntersection is;
+                is.t = FLT_MAX;
+                t = -1.0f;
+                if (BVHIntersectionTest(pathSegment.ray, hit_tri_index, is, bvh_tree, triangles)) {
+                    if (hit_tri_index >= geom.tri_start_idx && hit_tri_index < geom.tri_end_idx) {
+                        t = is.t;
+                        tmp_coord = is.texture_coord;
+                        tmp_normal = is.surfaceNormal;
+                    }
+                }
+            } else {
                 t = meshIntersectionTest(tmp_intersect, geom, pathSegment.ray, tmp_coord, tmp_normal, triangles, outside, settings->use_BoundingBoxTest);
+            }
         }
         // Compute the minimum t from the intersection tests to determine what
         // scene geometry object was hit first.
@@ -458,7 +471,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         // 计算路径交点
         computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> ( depth, num_remaining_paths, dev_paths, dev_geoms, 
-            hst_scene->geoms.size(), dev_intersections, dev_triangles, dev_boundingboxes, dev_settings );
+            hst_scene->geoms.size(), dev_intersections, dev_triangles, dev_boundingboxes, dev_bvh_tree, dev_settings );
         checkCUDAError("trace one bounce");
         depth += 1;
         cudaDeviceSynchronize();

@@ -113,6 +113,7 @@ void saveImage()
 
 void runCuda( bool& visual_changed )
 {
+    cudaDeviceSynchronize();
     if ( camchanged || visual_changed )
     {
         iteration = 0;

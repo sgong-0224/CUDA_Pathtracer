@@ -33,8 +33,8 @@ struct Geom
     glm::mat4 inverseTransform;
     glm::mat4 invTranspose;
     // Mesh:
-    int n_tris;
     int tri_start_idx;
+    int tri_end_idx;
     int boundingbox_idx;
     glm::vec3 min_bound;
     glm::vec3 max_bound;

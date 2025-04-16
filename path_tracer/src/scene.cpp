@@ -3,7 +3,7 @@
 #include <omp.h>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
-#include <unordered_map>
+#include <map>
 #include "json.hpp"
 #include <filesystem>
 
@@ -38,7 +38,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
     
     // Material
     const auto& materialsData = data["Materials"];
-    std::unordered_map<std::string, uint32_t> MatNameToID;
+    std::map<std::string, uint32_t> MatNameToID;
     for (const auto& item : materialsData.items())
     {
         const auto& name = item.key();
@@ -142,11 +142,11 @@ void Scene::loadFromJSON(const std::string& jsonName)
                 }
             }
 
-            newGeom.n_tris = triangles.size() - newGeom.tri_start_idx;
+            newGeom.tri_end_idx = triangles.size();
             // 计算BoundingBox
             newGeom.min_bound = triangles[0].vertices[0];
             newGeom.max_bound = triangles[0].vertices[0];
-            for (auto i = newGeom.tri_start_idx; i < newGeom.tri_start_idx + newGeom.n_tris; ++i ) {
+            for (auto i = newGeom.tri_start_idx; i < newGeom.tri_end_idx; ++i ) {
                 for (int j = 0; j < 3; ++j) {
                     // 对mesh, 将缩放应用到三角形上，全部完成后还原几何体本身的缩放
                     auto& tri = triangles[i];

@@ -147,7 +147,7 @@ float meshIntersectionTest(
     int min_idx = -1;
     float tmin = FLT_MAX;
     glm::vec3 barypos(0.0f), minbarypos(0.0f);
-    for (int i = mesh.tri_start_idx; i < mesh.tri_start_idx + mesh.n_tris; ++i) {
+    for (int i = mesh.tri_start_idx; i < mesh.tri_end_idx; ++i) {
         auto& t = triangles[i];
         // ÖØÐÄ×ø±ê barypos:
         // The baryPosition output uses barycentric coordinates for the x and y components.The z component is the scalar factor for ray.
@@ -181,7 +181,7 @@ bool BVHIntersectionTest(const Ray& r, int& hit_tri_id, ShadeableIntersection& i
         return false;
     bool hit = false;
 
-    constexpr const int MAX_SEARCH_DEPTH = 64;
+    constexpr const int MAX_SEARCH_DEPTH = 128;
     int next_node_offset = 0, curr_idx = 0;
     int to_visit[MAX_SEARCH_DEPTH];
     bool dir_neg[3] = { r.direction.x < 0.0f,r.direction.y < 0.0f,r.direction.z < 0.0f };
@@ -207,7 +207,7 @@ bool BVHIntersectionTest(const Ray& r, int& hit_tri_id, ShadeableIntersection& i
                 curr_idx = to_visit[--next_node_offset];
             }
             else {
-                if (next_node_offset >= MAX_SEARCH_DEPTH) {
+                if (next_node_offset == MAX_SEARCH_DEPTH) {
                     curr_idx = to_visit[--next_node_offset];
                     continue;
                 }
