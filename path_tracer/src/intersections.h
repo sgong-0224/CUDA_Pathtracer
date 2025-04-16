@@ -76,10 +76,8 @@ __host__ __device__ float sphereIntersectionTest(
 // 自定义检测函数
 __host__ __device__
 float meshIntersectionTest(
-    glm::vec3& intersection_point, Geom mesh, Ray r,
-    glm::vec2& texture_coord, glm::vec3& normal,
-    Triangle* triangles, bool& from_outside,
-    bool use_boundingbox
+    glm::vec3& intersection_point, Geom mesh, Ray r, glm::vec2& texture_coord, glm::vec3& normal,
+    Triangle* triangles, bool& from_outside, bool use_boundingbox
 );
 __host__ __device__
 bool BVHIntersectionTest(const Ray& r, int& hit_tri_id, ShadeableIntersection& isec,

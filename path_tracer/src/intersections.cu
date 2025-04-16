@@ -118,26 +118,20 @@ float sphereIntersectionTest(
 // 网格: 遍历
 __host__ __device__ 
 float meshIntersectionTest(
-    glm::vec3& intersection_point, Geom mesh, Ray r, 
-    glm::vec2& texture_coord, glm::vec3& normal, 
-    Triangle* triangles, bool& from_outside,
-    bool use_boundingbox
+    glm::vec3& intersection_point, Geom mesh, Ray r, glm::vec2& texture_coord, glm::vec3& normal, 
+    Triangle* triangles, bool& from_outside, bool use_boundingbox
 )
 {
-    // 计算mesh上的光线
-    glm::vec3 ray_origin = multiplyMV(mesh.inverseTransform, glm::vec4(r.origin, 1.0f));
-    glm::vec3 ray_direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(r.direction, 0.0f)));
-    Ray ray{ ray_origin,ray_direction };
-
+    // 在加载时已经应用过transform，不需要计算mesh上的光线了
     if ( use_boundingbox ) {
         // 快速检测，和 Boundingbox::intersect 一样的方法
-        glm::vec3 inv_direction{ 1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z };
-        float mx = (mesh.min_bound.x - ray.origin.x) * inv_direction.x;
-        float Mx = (mesh.max_bound.x - ray.origin.x) * inv_direction.x;
-        float my = (mesh.min_bound.y - ray.origin.y) * inv_direction.y;
-        float My = (mesh.max_bound.y - ray.origin.y) * inv_direction.y;
-        float mz = (mesh.min_bound.z - ray.origin.z) * inv_direction.z;
-        float Mz = (mesh.max_bound.z - ray.origin.z) * inv_direction.z;
+        glm::vec3 inv_direction{ 1.0f / r.direction.x, 1.0f / r.direction.y, 1.0f / r.direction.z };
+        float mx = (mesh.min_bound.x - r.origin.x) * inv_direction.x;
+        float Mx = (mesh.max_bound.x - r.origin.x) * inv_direction.x;
+        float my = (mesh.min_bound.y - r.origin.y) * inv_direction.y;
+        float My = (mesh.max_bound.y - r.origin.y) * inv_direction.y;
+        float mz = (mesh.min_bound.z - r.origin.z) * inv_direction.z;
+        float Mz = (mesh.max_bound.z - r.origin.z) * inv_direction.z;
         float min = glm::max(glm::max(glm::min(mx, Mx), glm::min(my, My)), glm::min(mz, Mz));
         float Max = glm::min(glm::min(glm::max(mx, Mx), glm::max(my, My)), glm::max(mz, Mz));
         if (Max < 0 || min > Max)
@@ -152,9 +146,8 @@ float meshIntersectionTest(
         // 重心坐标 barypos:
         // The baryPosition output uses barycentric coordinates for the x and y components.The z component is the scalar factor for ray.
         // That is, 1.0 - baryPosition.x - baryPosition.y = actual z barycentric coordinate
-        if (glm::intersectRayTriangle( 
-            ray.origin, ray.direction, t.vertices[0], t.vertices[1], t.vertices[2], barypos
-        )) {
+        if (glm::intersectRayTriangle( r.origin, r.direction, 
+            t.vertices[0], t.vertices[1], t.vertices[2], barypos )) {
             if (barypos.z > 0.0f && barypos.z < tmin) {
                 min_idx = i;
                 tmin = barypos.z;
@@ -181,15 +174,14 @@ bool BVHIntersectionTest(const Ray& r, int& hit_tri_id, ShadeableIntersection& i
         return false;
     bool hit = false;
 
-    constexpr const int MAX_SEARCH_DEPTH = 128;
+    constexpr const int MAX_SEARCH_DEPTH = 64;
     int next_node_offset = 0, curr_idx = 0;
     int to_visit[MAX_SEARCH_DEPTH];
-    bool dir_neg[3] = { r.direction.x < 0.0f,r.direction.y < 0.0f,r.direction.z < 0.0f };
-    glm::vec3 inv_dir(1.0f / r.direction.x, 1.0f / r.direction.y, 1.0f / r.direction.z);
+    bool dir_neg[3] = { r.direction.x < 0.0f, r.direction.y < 0.0f, r.direction.z < 0.0f };
+    glm::vec3 inv_dir( 1.0f / r.direction.x, 1.0f / r.direction.y, 1.0f / r.direction.z );
 
     while (true) {
         auto node = &bvh_nodes[curr_idx];
-        float tmp_t = 0.0f;
         if (node->bounds.intersect(r, inv_dir)) {
             if (node->sub_areas > 0) {
                 for (int i = 0; i < node->sub_areas; ++i) {

@@ -243,12 +243,14 @@ void RenderImGui()
     if (ImGui::CollapsingHeader("General settings:", ImGuiTreeNodeFlags_DefaultOpen)) {
         // 选项：俄罗斯轮盘终止算法
         ImGui::Checkbox("Russian roulette", &imguiData->russianRoulette);
-        // 选项：使用BVH树 | 使用包围盒测试
+        // 强制启用：BVH树 & 包围盒测试 是纹理映射的必选项，禁用会出现显示错误
+        #if false
         if (ImGui::Checkbox("Enable BVH tree", &imguiData->useBVHtree))
-            imguiData->useBBox = true;
+            ImguiData->useBBox = true;
         ImGui::BeginDisabled(imguiData->useBVHtree);
         ImGui::Checkbox("Enable boundingbox test", &imguiData->useBBox);
         ImGui::EndDisabled();
+        #endif
         // 选项：聚集材质
         ImGui::Checkbox("Sort by material(can harm performance)", &imguiData->sortbyMaterial);
         // 选项：使用thrust::partition消除终止路径

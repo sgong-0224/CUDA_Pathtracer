@@ -107,7 +107,6 @@ public:
     glm::vec3 vertices[3];
     glm::vec2 vertices_texture_coord[3];
     glm::vec3 vertex_normals[3];
-    glm::vec3 surface_normal;
     struct {
         glm::vec3 min_corner;
         glm::vec3 max_corner;

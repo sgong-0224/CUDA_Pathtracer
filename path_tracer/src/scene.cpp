@@ -86,6 +86,9 @@ void Scene::loadFromJSON(const std::string& jsonName)
         newGeom.translation = glm::vec3(trans[0], trans[1], trans[2]);
         newGeom.rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
         newGeom.scale = glm::vec3(scale[0], scale[1], scale[2]);
+        newGeom.transform = utilityCore::buildTransformationMatrix(newGeom.translation, newGeom.rotation, newGeom.scale);
+        newGeom.inverseTransform = glm::inverse(newGeom.transform);
+        newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
 
         const auto& type = p["TYPE"];
         if (type == "mesh") {   
@@ -108,9 +111,11 @@ void Scene::loadFromJSON(const std::string& jsonName)
             auto& norm = attr.normals;
             auto& texcoord = attr.texcoords;
             auto& vertices = attr.vertices;
-
+            float min_X = FLT_MAX, min_Y = FLT_MAX, min_Z = FLT_MAX;
+            float max_X = FLT_MIN, max_Y = FLT_MIN, max_Z = FLT_MIN;
             for (size_t i = 0; i < shapes.size(); ++i) {
                 size_t idx = 0;
+                // 在加载过程中应用 transform，并计算 BoundingBox
                 #pragma omp parallel for
                 for (size_t j = 0; j < shapes[i].mesh.num_face_vertices.size(); ++j) {
                     size_t fv = shapes[i].mesh.num_face_vertices[j];
@@ -121,13 +126,14 @@ void Scene::loadFromJSON(const std::string& jsonName)
                         tinyobj::real_t vx = attr.vertices[3 * mesh_id.vertex_index + 0];
                         tinyobj::real_t vy = attr.vertices[3 * mesh_id.vertex_index + 1];
                         tinyobj::real_t vz = attr.vertices[3 * mesh_id.vertex_index + 2];
-                        tri.vertices[v] = glm::vec3(vx, vy, vz);
+                        tri.vertices[v] = glm::vec3(newGeom.transform * glm::vec4(vx, vy, vz, 1.0f));
 
                         if(mesh_id.normal_index >= 0){
                             tinyobj::real_t norm_x = attr.normals[3 * mesh_id.normal_index + 0];
                             tinyobj::real_t norm_y = attr.normals[3 * mesh_id.normal_index + 1];
                             tinyobj::real_t norm_z = attr.normals[3 * mesh_id.normal_index + 2];
-                            tri.vertex_normals[v] = glm::vec3(norm_x, norm_y, norm_z);
+                            tri.vertex_normals[v] = glm::vec3(newGeom.invTranspose * 
+                                                    glm::vec4(norm_x, norm_y, norm_z, 0.0f));
                         }
                         
                         if (mesh_id.texcoord_index >= 0) {
@@ -136,29 +142,23 @@ void Scene::loadFromJSON(const std::string& jsonName)
                             tri.vertices_texture_coord[v] = glm::vec2(texcoord_u, texcoord_v);
                         }
                     }
+                    glm::vec3 min_p, max_p;
+                    tri.calculate_boundaries( min_p, max_p );
+                    min_X = min(min_p.x, min_X);
+                    min_Y = min(min_p.y, min_Y);
+                    min_Z = min(min_p.z, min_Z);
+                    max_X = max(max_p.x, max_X);
+                    max_Y = max(max_p.y, max_Y);
+                    max_Z = max(max_p.z, max_Z);
+
                     idx += fv;
-                    tri.surface_normal = glm::cross(tri.vertices[1] - tri.vertices[0], tri.vertices[2] - tri.vertices[0]);
+                    tri.id = triangles.size();
                     triangles.emplace_back(tri);
                 }
             }
-
             newGeom.tri_end_idx = triangles.size();
-            // 计算BoundingBox
-            newGeom.min_bound = triangles[0].vertices[0];
-            newGeom.max_bound = triangles[0].vertices[0];
-            for (auto i = newGeom.tri_start_idx; i < newGeom.tri_end_idx; ++i ) {
-                for (int j = 0; j < 3; ++j) {
-                    // 对mesh, 将缩放应用到三角形上，全部完成后还原几何体本身的缩放
-                    auto& tri = triangles[i];
-                    tri.vertices[j].x *= newGeom.scale[0];
-                    tri.vertices[j].y *= newGeom.scale[1];
-                    tri.vertices[j].z *= newGeom.scale[2];
-                    newGeom.min_bound = glm::min(newGeom.min_bound, tri.vertices[j]);
-                    newGeom.max_bound = glm::max(newGeom.max_bound, tri.vertices[j]);
-                }
-            }
-            newGeom.scale = glm::vec3(1.0f);
-            // TODO: scene boundingbox
+            newGeom.min_bound = glm::vec3(min_X, min_Y, min_Z);
+            newGeom.max_bound = glm::vec3(max_X, max_Y, max_Z);
             bounding_boxes.emplace_back(newGeom.min_bound, newGeom.max_bound);
         }
         else {
@@ -167,9 +167,6 @@ void Scene::loadFromJSON(const std::string& jsonName)
             else if (type == "sphere")
                 newGeom.type = SPHERE;
         }
-        newGeom.transform = utilityCore::buildTransformationMatrix(newGeom.translation, newGeom.rotation, newGeom.scale);
-        newGeom.inverseTransform = glm::inverse(newGeom.transform);
-        newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
         geoms.emplace_back(newGeom);
     }
 

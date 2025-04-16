@@ -169,6 +169,9 @@ BVHTree* build_bvh_tree(int& n_nodes, std::vector<Triangle>& triangles)
 	n_nodes = 0;
 	BVHTreeNode* root;
 	root = build_bvh(bounding_boxes, ordered_triangles, triangles, 0, n_tris, n_nodes);
+	// 更新 triangles
+	triangles.swap(ordered_triangles);
+
 	// 展平
 	BVHTree* tree = new BVHTree[n_nodes];
 	int offset = 0;

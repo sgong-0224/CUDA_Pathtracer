@@ -21,16 +21,16 @@ public:
     int TracedDepth;
     // Options:
     bool russianRoulette{ true };
-    bool useBVHtree{ false };
-    bool useBBox{ false };
+    bool useBVHtree{ true };
+    bool useBBox{ true };
     bool sortbyMaterial{ false };
     bool useThrustPartition{ false };
     // Visual Effects:
     bool SSAA{ true };
     // DoF: aperture, focal length?
     bool DoF{ true };
-    float aperture{ 0.2f };
-    float focal_len{ 24.0f };
+    float aperture{ 0.1f };
+    float focal_len{ 10.0f };
 };
 
 namespace utilityCore
