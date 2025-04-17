@@ -26,7 +26,7 @@ public:
     BVHTree* bvh_tree{ nullptr };
     int n_bvh_nodes = 0;
 
-    std::vector<Geom> geoms;
+    std::vector<Geom> boxes, spheres, meshes;
     std::vector<Material> materials;
     std::vector<Triangle> triangles;
     std::vector<BoundingBox> bounding_boxes;

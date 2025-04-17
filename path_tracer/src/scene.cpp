@@ -160,14 +160,17 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newGeom.min_bound = glm::vec3(min_X, min_Y, min_Z);
             newGeom.max_bound = glm::vec3(max_X, max_Y, max_Z);
             bounding_boxes.emplace_back(newGeom.min_bound, newGeom.max_bound);
-        }
-        else {
-            if (type == "cube")
+            meshes.emplace_back(newGeom);
+        } else {
+            if (type == "cube") {
                 newGeom.type = CUBE;
-            else if (type == "sphere")
+                boxes.emplace_back(newGeom);
+            }
+            else if (type == "sphere") {
                 newGeom.type = SPHERE;
+                spheres.emplace_back(newGeom);
+            }
         }
-        geoms.emplace_back(newGeom);
     }
 
     // Camera

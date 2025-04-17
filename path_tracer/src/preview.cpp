@@ -246,13 +246,19 @@ void RenderImGui()
         // 强制启用：BVH树 & 包围盒测试 是纹理映射的必选项，禁用会出现显示错误
         #if false
         if (ImGui::Checkbox("Enable BVH tree", &imguiData->useBVHtree))
-            ImguiData->useBBox = true;
+            imguiData->useBBox = true;
         ImGui::BeginDisabled(imguiData->useBVHtree);
         ImGui::Checkbox("Enable boundingbox test", &imguiData->useBBox);
         ImGui::EndDisabled();
         #endif
-        // 选项：聚集材质
-        ImGui::Checkbox("Sort by material(can harm performance)", &imguiData->sortbyMaterial);
+        // 选项：并行光线追踪
+        ImGui::Checkbox("Enable wavefront pathtracing", &imguiData->wavefrontRT);
+        // 强制禁用：按材质排序 已不需要，和现版本实现冲突
+        #if false
+        ImGui::BeginDisabled(imguiData->wavefrontRT);
+        ImGui::Checkbox("Sort by material", &imguiData->sortbyMaterial);
+        ImGui::EndDisabled();
+        #endif
         // 选项：使用thrust::partition消除终止路径
         ImGui::Checkbox("Use thrust library for path termination", &imguiData->useThrustPartition);
     }

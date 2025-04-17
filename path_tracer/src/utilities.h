@@ -25,6 +25,7 @@ public:
     bool useBBox{ true };
     bool sortbyMaterial{ false };
     bool useThrustPartition{ false };
+    bool wavefrontRT{ false };
     // Visual Effects:
     bool SSAA{ true };
     // DoF: aperture, focal length?
