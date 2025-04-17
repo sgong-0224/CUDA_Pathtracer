@@ -338,7 +338,7 @@ __global__ void shadeMaterials( int iter, int num_paths, Settings* settings, Sha
             path_segment.remainingBounces = 0;
             return;
         }
-        // F -> (F-qc)/(1-q) = F/1-q
+        // F -> (F-qc)/(1-q) = F/(1-q)
         path_segment.color /= 1.0f - q;
     }
 }
