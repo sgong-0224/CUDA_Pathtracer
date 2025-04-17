@@ -195,9 +195,9 @@ void pathtraceInit(Scene* scene)
         cudaMalloc(&(geoms_buf[i]), geoms_per_cat[i] * sizeof(Geom));
         cudaMemcpy(&(dev_geoms_buf[i]), &(geoms_buf[i]), sizeof(Geom*), cudaMemcpyHostToDevice);
     }
-    cudaMemcpy(geoms_buf[0], scene->boxes.data(), geoms_per_cat[0], cudaMemcpyHostToDevice);
-    cudaMemcpy(geoms_buf[1], scene->spheres.data(), geoms_per_cat[1], cudaMemcpyHostToDevice);
-    cudaMemcpy(geoms_buf[2], scene->meshes.data(), geoms_per_cat[2], cudaMemcpyHostToDevice);
+    cudaMemcpy(geoms_buf[0], scene->boxes.data(), geoms_per_cat[0] * sizeof(Geom), cudaMemcpyHostToDevice);
+    cudaMemcpy(geoms_buf[1], scene->spheres.data(), geoms_per_cat[1] * sizeof(Geom), cudaMemcpyHostToDevice);
+    cudaMemcpy(geoms_buf[2], scene->meshes.data(), geoms_per_cat[2] * sizeof(Geom), cudaMemcpyHostToDevice);
     for (int i = 0; i < N_CATEGORIES; ++i)
         total_geoms += geoms_per_cat[i];
     cudaMalloc(&dev_geoms, total_geoms * sizeof(Geom*));
@@ -295,7 +295,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
 // 计算路径交点
 // 传统方法
-__global__ void computeIntersections( int depth, int num_paths, PathSegment* pathSegments,  Geom** geoms, int geoms_size, 
+__global__ void computeIntersections( int num_paths, PathSegment* pathSegments,  Geom** geoms, int geoms_size, 
     ShadeableIntersection* intersections, Triangle* triangles, BoundingBox* bounds, BVHTree* bvh_tree, Settings* settings)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -344,9 +344,6 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
         // scene geometry object was hit first.
 
         if (t > 0.0f && t_min > t){
-            // DEBUG:
-            printf("Hit!\n");
-
             t_min = t;
             hit_geom_index = i;
             intersect_point = tmp_intersect;
@@ -368,11 +365,13 @@ __global__ void computeIntersections( int depth, int num_paths, PathSegment* pat
 
 // 1. 根据几何体类型计算碰撞交点
 __global__ void intersectBox(
-    int num_paths, PathSegment* pathSegments, Geom* box, int box_cnt,
-    ShadeableIntersection* intersections, ShadeableIntersection* out
+    int num_paths, PathSegment* pathSegments, Geom* box, int box_cnt, ShadeableIntersection* out
 )
 {
+    return;
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (path_index == 0)
+        printf("%d\n", num_paths);
     if (path_index >= num_paths)
         return;
     PathSegment& path = pathSegments[path_index];
@@ -384,6 +383,8 @@ __global__ void intersectBox(
     int hit_geom_index = -1;
     glm::vec3 tmp_intersect;
     glm::vec3 tmp_normal;
+    if (path_index == 0)
+        printf("Box!\n");
     for (int i = 0; i < box_cnt; ++i) {
         auto& geom = box[i];
         t = boxIntersectionTest(geom, path.ray, tmp_intersect, tmp_normal, outside);
@@ -401,10 +402,10 @@ __global__ void intersectBox(
         out[path_index].t = -1.0f;
 }
 __global__ void intersectSphere(
-    int num_paths, PathSegment* pathSegments, Geom* sphere, int sphere_cnt,
-    ShadeableIntersection* intersections, ShadeableIntersection* out
+    int num_paths, PathSegment* pathSegments, Geom* sphere, int sphere_cnt, ShadeableIntersection* out
 )
 {
+    return;
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (path_index >= num_paths)
         return;
@@ -434,11 +435,11 @@ __global__ void intersectSphere(
         out[path_index].t = -1.0f;
 }
 __global__ void intersectMesh(
-    int num_paths, PathSegment* pathSegments, Geom* mesh, int mesh_cnt,
-    ShadeableIntersection* intersections, ShadeableIntersection* out,
+    int num_paths, PathSegment* pathSegments, Geom* mesh, int mesh_cnt, ShadeableIntersection* out,
     Triangle* triangles, BoundingBox* bounds, BVHTree* bvh_tree, Settings* settings
 )
 {
+    return;
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (path_index >= num_paths)
         return;
@@ -620,7 +621,7 @@ int relocate_terminated_paths(int n_paths, dim3 n_blocks, int blocksize, PathSeg
     return new_npaths;
 }
 
-// 按材质排序
+// 按材质排序、去除停止光线(thrust)
 struct material_compare {
     __device__ bool operator()(const ShadeableIntersection& a, const ShadeableIntersection& b) {
         return a.materialId < b.materialId;
@@ -689,16 +690,15 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             cudaStreamCreate(&stream1);
             cudaStreamCreate(&stream2);
             cudaStreamCreate(&stream3);
-            if(dev_geoms_buf[2])
-                intersectMesh <<< numblocksPathSegmentTracing, blockSize1d, 0, stream1 >>> (num_remaining_paths, dev_paths,
-                dev_geoms_buf[2], dev_geoms_per_cat[2], dev_intersections, dev_isect_buf[2],
+
+            intersectMesh <<< numblocksPathSegmentTracing, blockSize1d, 0, stream1 >>> (num_remaining_paths, dev_paths,
+                dev_geoms_buf[2], dev_geoms_per_cat[2], dev_isect_buf[2],
                 dev_triangles, dev_boundingboxes, dev_bvh_tree, dev_settings);
-            if (dev_geoms_buf[1])
-                intersectSphere <<< numblocksPathSegmentTracing, blockSize1d, 0, stream2 >>> (num_remaining_paths, dev_paths,
-                dev_geoms_buf[1], dev_geoms_per_cat[1], dev_intersections, dev_isect_buf[1]);
-            if (dev_geoms_buf[0])
-                intersectBox <<< numblocksPathSegmentTracing, blockSize1d, 0, stream3 >>> (num_remaining_paths, dev_paths,
-                dev_geoms_buf[0], dev_geoms_per_cat[0], dev_intersections, dev_isect_buf[0]);
+            intersectSphere <<< numblocksPathSegmentTracing, blockSize1d, 0, stream2 >>> (num_remaining_paths, dev_paths,
+                dev_geoms_buf[1], dev_geoms_per_cat[1], dev_isect_buf[1]);
+            intersectBox <<< numblocksPathSegmentTracing, blockSize1d, 0, stream3 >>> (num_remaining_paths, dev_paths,
+                dev_geoms_buf[0], dev_geoms_per_cat[0], dev_isect_buf[0]);
+
             checkCUDAError("Intersection Test");
             cudaStreamSynchronize(stream1);
             cudaStreamSynchronize(stream2);
@@ -712,7 +712,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             checkCUDAError("Collect Paths");
             cudaDeviceSynchronize();
         } else {
-            computeIntersections <<< numblocksPathSegmentTracing, blockSize1d >>> (depth, num_remaining_paths, dev_paths, dev_geoms,
+            computeIntersections <<< numblocksPathSegmentTracing, blockSize1d >>> ( num_remaining_paths, dev_paths, dev_geoms,
                 total_geoms, dev_intersections, dev_triangles, dev_boundingboxes, dev_bvh_tree, dev_settings);
             checkCUDAError("trace one bounce");
             depth += 1;
