@@ -365,16 +365,18 @@ __global__ void computeIntersections( int num_paths, PathSegment* pathSegments, 
 
 // 1. 根据几何体类型计算碰撞交点
 __global__ void intersectBox(
-    int num_paths, PathSegment* pathSegments, Geom* box, int box_cnt, ShadeableIntersection* out
+    int box_id, int num_paths, PathSegment* pathSegments, 
+    Geom** geoms, int* cnt_buf, ShadeableIntersection** out_buf
 )
 {
-    return;
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (path_index == 0)
-        printf("%d\n", num_paths);
     if (path_index >= num_paths)
         return;
     PathSegment& path = pathSegments[path_index];
+    auto& box_cnt = cnt_buf[box_id];
+    auto& box = geoms[box_id];
+    auto& out = out_buf[box_id];
+
     float t;
     glm::vec3 intersect_point;
     glm::vec3 normal;
@@ -383,8 +385,6 @@ __global__ void intersectBox(
     int hit_geom_index = -1;
     glm::vec3 tmp_intersect;
     glm::vec3 tmp_normal;
-    if (path_index == 0)
-        printf("Box!\n");
     for (int i = 0; i < box_cnt; ++i) {
         auto& geom = box[i];
         t = boxIntersectionTest(geom, path.ray, tmp_intersect, tmp_normal, outside);
@@ -396,19 +396,24 @@ __global__ void intersectBox(
         }
     }
     out[path_index].t = t_min;
-    out[path_index].materialId = box[hit_geom_index].materialid;
     out[path_index].surfaceNormal = normal;
     if (hit_geom_index == -1)
         out[path_index].t = -1.0f;
+    else
+        out[path_index].materialId = box[hit_geom_index].materialid;
 }
 __global__ void intersectSphere(
-    int num_paths, PathSegment* pathSegments, Geom* sphere, int sphere_cnt, ShadeableIntersection* out
+    int sphere_id, int num_paths, PathSegment* pathSegments, 
+    Geom** geoms, int* cnt_buf, ShadeableIntersection** out_buf
 )
 {
-    return;
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (path_index >= num_paths)
         return;
+    auto& sphere_cnt = cnt_buf[sphere_id];
+    auto& sphere = geoms[sphere_id];
+    auto& out = out_buf[sphere_id];
+
     PathSegment& path = pathSegments[path_index];
     float t;
     glm::vec3 intersect_point;
@@ -429,20 +434,25 @@ __global__ void intersectSphere(
         }
     }
     out[path_index].t = t_min;
-    out[path_index].materialId = sphere[hit_geom_index].materialid;
     out[path_index].surfaceNormal = normal;
     if (hit_geom_index == -1)
         out[path_index].t = -1.0f;
+    else
+        out[path_index].materialId = sphere[hit_geom_index].materialid;
 }
 __global__ void intersectMesh(
-    int num_paths, PathSegment* pathSegments, Geom* mesh, int mesh_cnt, ShadeableIntersection* out,
+    int mesh_id, int num_paths, PathSegment* pathSegments, 
+    Geom** geoms, int* cnt_buf, ShadeableIntersection** out_buf,
     Triangle* triangles, BoundingBox* bounds, BVHTree* bvh_tree, Settings* settings
 )
 {
-    return;
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (path_index >= num_paths)
         return;
+    auto& mesh_cnt = cnt_buf[mesh_id];
+    auto& mesh = geoms[mesh_id];
+    auto& out = out_buf[mesh_id];
+
     PathSegment& path = pathSegments[path_index];
     float t;
     glm::vec3 intersect_point;
@@ -480,17 +490,17 @@ __global__ void intersectMesh(
         }
     }
     out[path_index].t = t_min;
-    out[path_index].materialId = mesh[hit_geom_index].materialid;
     out[path_index].texture_coord = coord;
     out[path_index].surfaceNormal = normal;
     if (hit_geom_index == -1)
         out[path_index].t = -1.0f;
+    else 
+        out[path_index].materialId = mesh[hit_geom_index].materialid;
 }
 // 2. 根据交点更新相关信息
 __global__ void CollectMinPoints(
-    int num_paths, int geom_cats, Geom** all_geoms,
-    ShadeableIntersection** isect_buf,
-    ShadeableIntersection* final_result
+    int geom_cats, int num_paths, 
+    ShadeableIntersection** isect_buf, ShadeableIntersection* final_result
 )
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -499,8 +509,6 @@ __global__ void CollectMinPoints(
     float t_min = FLT_MAX;
     bool hit = false;
     for (int i = 0; i < geom_cats; ++i) {
-        if (!isect_buf[i])
-            continue;
         auto& isect = isect_buf[i][path_index];
         if (isect.t > 0.0f && t_min > isect.t) {
             hit = true;
@@ -686,37 +694,34 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         /* ======================== 计算路径交点 ======================== */
         if (settings.wavefront_RT) {
-            cudaStream_t stream1, stream2, stream3;
+            cudaStream_t stream0, stream1, stream2;
+            cudaStreamCreate(&stream0);
             cudaStreamCreate(&stream1);
             cudaStreamCreate(&stream2);
-            cudaStreamCreate(&stream3);
-
-            intersectMesh <<< numblocksPathSegmentTracing, blockSize1d, 0, stream1 >>> (num_remaining_paths, dev_paths,
-                dev_geoms_buf[2], dev_geoms_per_cat[2], dev_isect_buf[2],
+            intersectMesh <<< numblocksPathSegmentTracing, blockSize1d, 0, stream2 >>> (
+                2, num_remaining_paths, dev_paths, dev_geoms_buf, dev_geoms_per_cat, dev_isect_buf,
                 dev_triangles, dev_boundingboxes, dev_bvh_tree, dev_settings);
-            intersectSphere <<< numblocksPathSegmentTracing, blockSize1d, 0, stream2 >>> (num_remaining_paths, dev_paths,
-                dev_geoms_buf[1], dev_geoms_per_cat[1], dev_isect_buf[1]);
-            intersectBox <<< numblocksPathSegmentTracing, blockSize1d, 0, stream3 >>> (num_remaining_paths, dev_paths,
-                dev_geoms_buf[0], dev_geoms_per_cat[0], dev_isect_buf[0]);
-
-            checkCUDAError("Intersection Test");
+            intersectSphere <<< numblocksPathSegmentTracing, blockSize1d, 0, stream1 >>> (
+                1, num_remaining_paths, dev_paths, dev_geoms_buf, dev_geoms_per_cat, dev_isect_buf );
+            intersectBox <<< numblocksPathSegmentTracing, blockSize1d, 0, stream0 >>> (
+                0, num_remaining_paths, dev_paths, dev_geoms_buf, dev_geoms_per_cat, dev_isect_buf);
+            cudaStreamSynchronize(stream0);
             cudaStreamSynchronize(stream1);
             cudaStreamSynchronize(stream2);
-            cudaStreamSynchronize(stream3);
+            checkCUDAError("Intersection Test");
             CollectMinPoints <<< numblocksPathSegmentTracing, blockSize1d >>>(
-                num_remaining_paths, N_CATEGORIES, dev_geoms_buf, dev_isect_buf, dev_intersections 
-            );
+                N_CATEGORIES, num_remaining_paths, dev_isect_buf, dev_intersections );
+            cudaStreamDestroy(stream0);
             cudaStreamDestroy(stream1);
             cudaStreamDestroy(stream2);
-            cudaStreamDestroy(stream3);
             checkCUDAError("Collect Paths");
             cudaDeviceSynchronize();
         } else {
             computeIntersections <<< numblocksPathSegmentTracing, blockSize1d >>> ( num_remaining_paths, dev_paths, dev_geoms,
                 total_geoms, dev_intersections, dev_triangles, dev_boundingboxes, dev_bvh_tree, dev_settings);
-            checkCUDAError("trace one bounce");
             depth += 1;
-            cudaDeviceSynchronize();
+            cudaDeviceSynchronize(); 
+            checkCUDAError("trace one bounce");
             if (settings.enable_SortbyMaterial) {
                 thrust::sort_by_key(
                     thrust::device,
@@ -728,9 +733,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
                     // compare ordering
                     material_compare()
                 );
-                checkCUDAError("sort intersections by material");
             }
             cudaDeviceSynchronize();
+            checkCUDAError("sort intersections by material");
         }
         /* ============================================================ */
               
