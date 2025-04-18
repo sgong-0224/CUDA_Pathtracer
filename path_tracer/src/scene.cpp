@@ -116,10 +116,10 @@ void Scene::loadFromJSON(const std::string& jsonName)
             for (size_t i = 0; i < shapes.size(); ++i) {
                 size_t idx = 0;
                 // 在加载过程中应用 transform，并计算 BoundingBox
-                #pragma omp parallel for
                 for (size_t j = 0; j < shapes[i].mesh.num_face_vertices.size(); ++j) {
                     size_t fv = shapes[i].mesh.num_face_vertices[j];
                     Triangle tri;
+#pragma omp parallel for
                     for (size_t v = 0; v < fv; ++v) {
                         tinyobj::index_t mesh_id = shapes[i].mesh.indices[idx + v];
                         
@@ -144,13 +144,24 @@ void Scene::loadFromJSON(const std::string& jsonName)
                     }
                     glm::vec3 min_p, max_p;
                     tri.calculate_boundaries( min_p, max_p );
-                    min_X = min(min_p.x, min_X);
-                    min_Y = min(min_p.y, min_Y);
-                    min_Z = min(min_p.z, min_Z);
-                    max_X = max(max_p.x, max_X);
-                    max_Y = max(max_p.y, max_Y);
-                    max_Z = max(max_p.z, max_Z);
-
+#pragma omp parallel num_threads(6)
+                    {
+#pragma omp sections nowait
+                        {
+#pragma omp section
+                            min_X = min(min_p.x, min_X);
+#pragma omp section
+                            min_Y = min(min_p.y, min_Y);
+#pragma omp section
+                            min_Z = min(min_p.z, min_Z);
+#pragma omp section
+                            max_X = max(max_p.x, max_X);
+#pragma omp section
+                            max_Y = max(max_p.y, max_Y);
+#pragma omp section
+                            max_Z = max(max_p.z, max_Z);
+                        }
+                    }
                     idx += fv;
                     tri.id = triangles.size();
                     triangles.emplace_back(tri);
